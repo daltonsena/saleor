@@ -6,7 +6,7 @@ from django.conf import settings
 from django.contrib.postgres.fields import JSONField
 from django.core.validators import MinValueValidator
 from django.db import models
-from django.db.models import ExpressionWrapper, F, Max, Sum
+from django.db.models import F, Max, Sum
 from django.urls import reverse
 from django.utils.timezone import now
 from django.utils.translation import pgettext_lazy
@@ -96,6 +96,8 @@ class Order(models.Model):
     shipping_method_name = models.CharField(
         max_length=255, null=True, default=None, blank=True, editable=False)
     token = models.CharField(max_length=36, unique=True, blank=True)
+    # Token of a checkout instance that this order was created from
+    checkout_token = models.CharField(max_length=36, blank=True)
     total_net = MoneyField(
         currency=settings.DEFAULT_CURRENCY,
         max_digits=settings.DEFAULT_MAX_DIGITS,
@@ -126,7 +128,7 @@ class Order(models.Model):
     objects = OrderQueryset.as_manager()
 
     class Meta:
-        ordering = ('-pk',)
+        ordering = ('-pk', )
         permissions = ((
             'manage_orders',
             pgettext_lazy('Permission description', 'Manage orders.')),)
@@ -176,17 +178,17 @@ class Order(models.Model):
     def get_last_payment(self):
         return max(self.payments.all(), default=None, key=attrgetter('pk'))
 
-    def get_last_payment_status(self):
+    def get_payment_status(self):
         last_payment = self.get_last_payment()
         if last_payment:
             return last_payment.charge_status
-        return None
+        return ChargeStatus.NOT_CHARGED
 
-    def get_last_payment_status_display(self):
+    def get_payment_status_display(self):
         last_payment = self.get_last_payment()
         if last_payment:
             return last_payment.get_charge_status_display()
-        return None
+        return dict(ChargeStatus.CHOICES).get(ChargeStatus.NOT_CHARGED)
 
     def is_pre_authorized(self):
         return self.payments.filter(
@@ -272,11 +274,7 @@ class Order(models.Model):
         return self.total_captured - self.total.gross
 
     def get_total_weight(self):
-        # Cannot use `sum` as it parses an empty Weight to an int
-        weights = Weight(kg=0)
-        for line in self:
-            weights += line.variant.get_weight() * line.quantity
-        return weights
+        return self.weight
 
 
 class OrderLine(models.Model):
@@ -308,7 +306,7 @@ class OrderLine(models.Model):
         max_digits=5, decimal_places=2, default=Decimal('0.0'))
 
     class Meta:
-        ordering = ('pk',)
+        ordering = ('pk', )
 
     def __str__(self):
         return self.product_name
@@ -365,7 +363,7 @@ class FulfillmentLine(models.Model):
         OrderLine, related_name='+', on_delete=models.CASCADE)
     fulfillment = models.ForeignKey(
         Fulfillment, related_name='lines', on_delete=models.CASCADE)
-    quantity = models.IntegerField(validators=[MinValueValidator(1)])
+    quantity = models.PositiveIntegerField()
 
 
 class OrderEvent(models.Model):

@@ -7,21 +7,23 @@
 # Optimus Prime <thebadfatrat@gmail.com>, 2018
 # Dima Veselov <d.a.veselov@yandex.ru>, 2018
 # Dmitriy D, 2018
-# Никита Евстропов <evstropov.n@gmail.com>, 2018
 # Maxim <astra1@users.noreply.github.com>, 2018
 # Evgeny Semenov, 2018
 # Kirill Makhonin <kroks.rus@gmail.com>, 2018
 # danSamara <dan.samara@gmail.com>, 2018
 # Weronika Terpilowska <weronika@mirumee.com>, 2018
+# Никита Евстропов <evstropov.n@gmail.com>, 2018
+# Eugene <eugene.mechanism@gmail.com>, 2018
+# Дмитрий К <kriv@sngy.ru>, 2019
 # 
 #, fuzzy
 msgid ""
 msgstr ""
 "Project-Id-Version: master\n"
 "Report-Msgid-Bugs-To: \n"
-"POT-Creation-Date: 2018-12-03 09:23-0600\n"
+"POT-Creation-Date: 2019-02-12 07:24-0600\n"
 "PO-Revision-Date: 2017-02-09 15:43+0000\n"
-"Last-Translator: Weronika Terpilowska <weronika@mirumee.com>, 2018\n"
+"Last-Translator: Дмитрий К <kriv@sngy.ru>, 2019\n"
 "Language-Team: Russian (https://www.transifex.com/mirumee/teams/34782/ru/)\n"
 "MIME-Version: 1.0\n"
 "Content-Type: text/plain; charset=UTF-8\n"
@@ -78,6 +80,11 @@ msgstr "Описание"
 msgctxt "Category form"
 msgid "Background Image"
 msgstr "Изображение фона"
+
+#: saleor/dashboard/category/forms.py:31
+msgctxt "Description of a category image"
+msgid "Image description"
+msgstr "Описание изображения"
 
 #: saleor/dashboard/category/views.py:47
 #, python-format
@@ -157,14 +164,26 @@ msgstr "Товары"
 #: saleor/dashboard/collection/forms.py:27
 msgctxt "Background image of a collection"
 msgid "Background image"
-msgstr ""
+msgstr "Фоновое изображение"
 
-#: saleor/dashboard/collection/forms.py:30
+#: saleor/dashboard/collection/forms.py:29
+msgctxt "Description of a collection image"
+msgid "Image description"
+msgstr "Описание изображения"
+
+#: saleor/dashboard/collection/forms.py:32
 msgctxt "Collection published toggle"
 msgid "Published"
 msgstr "Опубликован"
 
-#: saleor/dashboard/collection/forms.py:33
+#: saleor/dashboard/collection/forms.py:36
+msgctxt ""
+"The publication date field, can be a posterior date for a planned "
+"publication."
+msgid "Published date"
+msgstr "Дата публикации"
+
+#: saleor/dashboard/collection/forms.py:39
 msgctxt "Description field of a collection"
 msgid "Description"
 msgstr "Описание"
@@ -190,19 +209,19 @@ msgid "Deleted collection"
 msgstr "Коллекция удалена"
 
 #: saleor/dashboard/customer/filters.py:17
-#: saleor/dashboard/staff/filters.py:17
+#: saleor/dashboard/staff/filters.py:16
 msgctxt "Customer list sorting option"
 msgid "email"
 msgstr "email"
 
 #: saleor/dashboard/customer/filters.py:19
-#: saleor/dashboard/staff/filters.py:19
+#: saleor/dashboard/staff/filters.py:18
 msgctxt "Customer list sorting option"
 msgid "name"
 msgstr "имя"
 
 #: saleor/dashboard/customer/filters.py:21
-#: saleor/dashboard/staff/filters.py:21
+#: saleor/dashboard/staff/filters.py:20
 msgctxt "Customer list sorting option"
 msgid "location"
 msgstr "местоположение"
@@ -237,7 +256,7 @@ msgctxt "Customer list filter label"
 msgid "Sort by"
 msgstr "Сортировать по"
 
-#: saleor/dashboard/customer/filters.py:74
+#: saleor/dashboard/customer/filters.py:76
 #, python-format
 msgctxt "Number of matching records in the dashboard customers list"
 msgid "Found %(counter)d matching customer"
@@ -247,7 +266,13 @@ msgstr[1] "Найдено %(counter)d совпадающих пользоват�
 msgstr[2] "Найдено %(counter)d совпадающих пользователей"
 msgstr[3] "Найдено %(counter)d совпадающих пользователей"
 
-#: saleor/dashboard/customer/forms.py:22
+#: saleor/dashboard/customer/forms.py:10
+#, python-format
+msgctxt "Customer form: Name field placeholder"
+msgid "%(name)s (Inherit from default billing address)"
+msgstr "%(name)s (Взято из платежного адреса по-умолчанию)"
+
+#: saleor/dashboard/customer/forms.py:29
 msgctxt "Edit customer details in order form error"
 msgid ""
 "You can't delete your own account via dashboard, please try from the "
@@ -256,37 +281,47 @@ msgstr ""
 "Вы не можете удалить свою учётную запись через панель управления, "
 "пожалуйста, попробуйте это сделать через онлайн-магазин"
 
-#: saleor/dashboard/customer/forms.py:27
+#: saleor/dashboard/customer/forms.py:34
 msgctxt "Edit customer details in order form error"
 msgid "Only superuser can delete his own account."
 msgstr "Только администратор может удалить свой аккаунт."
 
-#: saleor/dashboard/customer/forms.py:32
+#: saleor/dashboard/customer/forms.py:39
 msgctxt "Edit customer details in order form error"
 msgid "You have insufficient permissions, to edit staff users."
 msgstr "Недостаточно прав для редактирования пользователей."
 
-#: saleor/dashboard/customer/forms.py:50
+#: saleor/dashboard/customer/forms.py:67 saleor/dashboard/staff/forms.py:23
+msgctxt "Customer form: Given name field"
+msgid "Given name"
+msgstr "Имя"
+
+#: saleor/dashboard/customer/forms.py:69 saleor/dashboard/staff/forms.py:25
+msgctxt "Customer form: Family name field"
+msgid "Family name"
+msgstr "Фамилия"
+
+#: saleor/dashboard/customer/forms.py:71
 msgctxt "Customer form: email address field"
 msgid "Email"
 msgstr "Email"
 
-#: saleor/dashboard/customer/forms.py:52
+#: saleor/dashboard/customer/forms.py:73
 msgctxt "Customer form: is active toggle"
 msgid "User is active"
 msgstr "Пользователь активен"
 
-#: saleor/dashboard/customer/forms.py:54
+#: saleor/dashboard/customer/forms.py:75
 msgctxt "Customer form: customer note field"
 msgid "Notes"
 msgstr "Заметки"
 
-#: saleor/dashboard/customer/forms.py:64
+#: saleor/dashboard/customer/forms.py:85
 msgctxt "Customer note"
 msgid "Note"
 msgstr "Заметка"
 
-#: saleor/dashboard/customer/forms.py:67
+#: saleor/dashboard/customer/forms.py:88
 msgctxt "Allow customers to see note toggle"
 msgid "Customer can see this note"
 msgstr "Покупатели могут видеть эту запись"
@@ -835,7 +870,7 @@ msgctxt "Order list filter label"
 msgid "Sort by"
 msgstr "Сортировать по"
 
-#: saleor/dashboard/order/filters.py:74
+#: saleor/dashboard/order/filters.py:76
 #, python-format
 msgctxt "Number of matching records in the dashboard orders list"
 msgid "Found %(counter)d matching order"
@@ -845,38 +880,38 @@ msgstr[1] "Найдено %(counter)d совпадающих заказов"
 msgstr[2] "Найдено %(counter)d совпадающих заказов"
 msgstr[3] "Найдено %(counter)d совпадающих заказов"
 
-#: saleor/dashboard/order/forms.py:39
+#: saleor/dashboard/order/forms.py:40
 msgctxt "Send email to customer about order created by staff users"
 msgid "Send email with order confirmation to the customer"
 msgstr "Отправить электронное письмо с подтверждением заказа покупателю"
 
-#: saleor/dashboard/order/forms.py:57
+#: saleor/dashboard/order/forms.py:58
 msgctxt "Create draft order form error"
 msgid "Could not create order without any products"
 msgstr "Нельзя создать заказ без товаров"
 
-#: saleor/dashboard/order/forms.py:67
+#: saleor/dashboard/order/forms.py:68
 msgctxt "Create draft order form error"
 msgid "Shipping method is not valid for chosen shipping address"
 msgstr "Способ доставки недоступен для выбранного адреса"
 
-#: saleor/dashboard/order/forms.py:95
+#: saleor/dashboard/order/forms.py:96
 msgctxt "Update an order with user default addresses"
 msgid "Set billing and shipping address in order to customer defaults"
 msgstr ""
 "Установить адреса оплаты и доставки в заказе по умолчанию для покупателя"
 
-#: saleor/dashboard/order/forms.py:103
+#: saleor/dashboard/order/forms.py:104
 msgctxt "Order form: editing customer details - selecting a customer"
 msgid "Customer"
 msgstr "Покупатель"
 
-#: saleor/dashboard/order/forms.py:111
+#: saleor/dashboard/order/forms.py:112
 msgctxt "Order customer email"
 msgid "Email"
 msgstr "Email"
 
-#: saleor/dashboard/order/forms.py:126
+#: saleor/dashboard/order/forms.py:127
 msgctxt "Edit customer details in order form error"
 msgid ""
 "An order can be related either with an email or an existing user account"
@@ -884,68 +919,68 @@ msgstr ""
 "Покупка может быть связана с электронной почтой или с существующей учётной "
 "записью пользователя"
 
-#: saleor/dashboard/order/forms.py:154
+#: saleor/dashboard/order/forms.py:155
 msgctxt "Shipping method form field label"
 msgid "Shipping method"
 msgstr "Способ доставки"
 
-#: saleor/dashboard/order/forms.py:211
+#: saleor/dashboard/order/forms.py:212
 msgctxt "Order discount amount fixed value"
 msgid "Discount amount"
 msgstr "размер скидки"
 
-#: saleor/dashboard/order/forms.py:223
+#: saleor/dashboard/order/forms.py:224
 msgctxt "Order voucher"
 msgid "Voucher"
 msgstr "купон"
 
-#: saleor/dashboard/order/forms.py:251
+#: saleor/dashboard/order/forms.py:252
 msgctxt "Order note"
 msgid "Note"
 msgstr "Заметка"
 
-#: saleor/dashboard/order/forms.py:257
+#: saleor/dashboard/order/forms.py:258
 msgctxt "Payment management form (capture, refund, void)"
 msgid "Amount"
 msgstr "Количество"
 
-#: saleor/dashboard/order/forms.py:272 saleor/dashboard/order/forms.py:328
+#: saleor/dashboard/order/forms.py:273 saleor/dashboard/order/forms.py:329
 #, python-format
 msgctxt "Payment form error"
 msgid "Payment gateway error: %s"
 msgstr "Ошибка платежного шлюза: %s"
 
-#: saleor/dashboard/order/forms.py:288
+#: saleor/dashboard/order/forms.py:289
 msgctxt "Payment form error"
 msgid "Only pre-authorized payments can be captured"
 msgstr "Только авторизованные платежи могут быть зафиксированы"
 
-#: saleor/dashboard/order/forms.py:298
+#: saleor/dashboard/order/forms.py:299
 msgctxt "Payment form error"
 msgid "Only confirmed payments can be refunded"
 msgstr "Только подтвержденные платежи могут быть возмещены"
 
-#: saleor/dashboard/order/forms.py:306
+#: saleor/dashboard/order/forms.py:307
 msgctxt "Payment form error"
 msgid "Manual payments can not be refunded"
 msgstr "Оплата в ручном режиме не может быть возвращена"
 
-#: saleor/dashboard/order/forms.py:323
+#: saleor/dashboard/order/forms.py:324
 msgctxt "Payment form error"
 msgid "Only pre-authorized payments can be voided"
-msgstr ""
+msgstr "Только предварительно одобренные платежи могут быть отменены"
 
-#: saleor/dashboard/order/forms.py:352
+#: saleor/dashboard/order/forms.py:353
 msgctxt "Mark order as paid form error"
 msgid "Orders with payments can not be manually marked as paid"
 msgstr "Заказы с оплатой не могут быть помечены оплаченными вручную"
 
-#: saleor/dashboard/order/forms.py:383
+#: saleor/dashboard/order/forms.py:384
 msgctxt "Integer number"
 msgid "Quantity"
 msgstr "Количество"
 
-#: saleor/dashboard/order/forms.py:402
+#: saleor/dashboard/order/forms.py:403
 #, python-format
 msgctxt "Change quantity form error"
 msgid "Only %(remaining)d remaining in stock."
@@ -955,7 +990,7 @@ msgstr[1] "Только  %(remaining)d осталось на складе"
 msgstr[2] "Только  %(remaining)d осталось на складе"
 msgstr[3] "Только  %(remaining)d осталось на складе"
 
-#: saleor/dashboard/order/forms.py:434
+#: saleor/dashboard/order/forms.py:435
 #, python-format
 msgctxt "Cancel order form action"
 msgid "Restock %(quantity)d item"
@@ -965,12 +1000,12 @@ msgstr[1] "Пополнить запас %(quantity)d товаров"
 msgstr[2] "Пополнить запас %(quantity)d товаров"
 msgstr[3] "Пополнить запас %(quantity)d товаров"
 
-#: saleor/dashboard/order/forms.py:444
+#: saleor/dashboard/order/forms.py:445
 msgctxt "Cancel order form error"
 msgid "This order can't be canceled"
 msgstr "Этот заказ не может быть отменён"
 
-#: saleor/dashboard/order/forms.py:464
+#: saleor/dashboard/order/forms.py:465
 #, python-format
 msgctxt "Cancel fulfillment form action"
 msgid "Restock %(quantity)d item"
@@ -980,63 +1015,63 @@ msgstr[1] "Пополнить запас %(quantity)d товаров"
 msgstr[2] "Пополнить запас %(quantity)d товаров"
 msgstr[3] "Пополнить запас %(quantity)d товаров"
 
-#: saleor/dashboard/order/forms.py:474
+#: saleor/dashboard/order/forms.py:475
 msgctxt "Cancel fulfillment form error"
 msgid "This fulfillment can't be canceled"
 msgstr "Пополнение не может быть отменено"
 
-#: saleor/dashboard/order/forms.py:487
+#: saleor/dashboard/order/forms.py:488
 msgctxt "Send mail to customer"
 msgid "Send notification email to customer"
 msgstr "Отправить email с уведомлением покупателю"
 
-#: saleor/dashboard/order/forms.py:494
+#: saleor/dashboard/order/forms.py:495
 msgctxt "Fulfillment record"
 msgid "Tracking number"
 msgstr "номер отслеживания"
 
-#: saleor/dashboard/order/forms.py:515
+#: saleor/dashboard/order/forms.py:516
 msgctxt "Remove voucher form error"
 msgid "This order has no voucher"
 msgstr "Этот заказ не имеет купона"
 
-#: saleor/dashboard/order/forms.py:528
+#: saleor/dashboard/order/forms.py:529
 msgctxt "Payment status field value"
 msgid "All"
 msgstr "Все"
 
-#: saleor/dashboard/order/forms.py:545
+#: saleor/dashboard/order/forms.py:546
 msgctxt "Order form: subform to add variant to order form: variant field"
 msgid "Variant"
 msgstr "Варианты"
 
-#: saleor/dashboard/order/forms.py:548
+#: saleor/dashboard/order/forms.py:549
 msgctxt "Add variant to order form label"
 msgid "Quantity"
 msgstr "Количество"
 
-#: saleor/dashboard/order/forms.py:569
+#: saleor/dashboard/order/forms.py:570
 #, python-format
 msgctxt "Add item form error"
 msgid "Could not add item. Only %(remaining)d remaining in stock."
 msgstr "Невозможно добавить товар. Только %(remaining)d осталось доступно."
 
-#: saleor/dashboard/order/forms.py:592
+#: saleor/dashboard/order/forms.py:593
 msgctxt "Order form: address subform - phone number input field"
 msgid "Phone number"
 msgstr "Номер телефона"
 
-#: saleor/dashboard/order/forms.py:601
+#: saleor/dashboard/order/forms.py:602
 msgctxt "Send mail to customer"
 msgid "Send shipment details to your customer now"
 msgstr "Отправить детали доставки покупателю"
 
-#: saleor/dashboard/order/forms.py:609
+#: saleor/dashboard/order/forms.py:610
 msgctxt "Order tracking number"
 msgid "Tracking number"
 msgstr "номер отслеживания"
 
-#: saleor/dashboard/order/forms.py:639
+#: saleor/dashboard/order/forms.py:640
 #, python-format
 msgctxt "Fulfill order line form error"
 msgid "%(quantity)d item remaining to fulfill."
@@ -1081,7 +1116,7 @@ msgstr "Возмещены %(amount)s"
 #: saleor/dashboard/order/views.py:224
 msgctxt "Dashboard message"
 msgid "Voided payment"
-msgstr ""
+msgstr "Отмененный платеж"
 
 #: saleor/dashboard/order/views.py:249
 #, python-format
@@ -1435,12 +1470,12 @@ msgstr ""
 #: saleor/dashboard/product/forms.py:83
 msgctxt "Product type attributes"
 msgid "Attributes common to all variants."
-msgstr ""
+msgstr "Атрибуты общие для всех вариантов."
 
 #: saleor/dashboard/product/forms.py:88
 msgctxt "Product type attributes"
 msgid "Attributes specific to each variant."
-msgstr ""
+msgstr "Атрибуты специфичные для каждого варианта."
 
 #: saleor/dashboard/product/forms.py:99
 msgctxt "Enable variants"
@@ -1981,17 +2016,17 @@ msgctxt "Dashboard message"
 msgid "Removed site authorization key %s"
 msgstr "Ключ авторизации %s удалён"
 
-#: saleor/dashboard/staff/filters.py:30
+#: saleor/dashboard/staff/filters.py:29
 msgctxt "Group list filter label"
 msgid "Permissions"
 msgstr "Права доступа"
 
-#: saleor/dashboard/staff/filters.py:34
+#: saleor/dashboard/staff/filters.py:33
 msgctxt "Staff list filter label"
 msgid "Sort by"
 msgstr "Сортировать по"
 
-#: saleor/dashboard/staff/filters.py:46
+#: saleor/dashboard/staff/filters.py:45
 #, python-format
 msgctxt "Number of matching records in the dashboard staff members list"
 msgid "Found %(counter)d matching staff member"
@@ -2001,17 +2036,17 @@ msgstr[1] "Найдено %(counter)d совпадающих сотрудник�
 msgstr[2] "Найдено %(counter)d совпадающих сотрудников"
 msgstr[3] "Найдено %(counter)d совпадающих сотрудников"
 
-#: saleor/dashboard/staff/forms.py:14
+#: saleor/dashboard/staff/forms.py:15
 msgctxt "Label above the permissions choicefield"
 msgid "Permissions"
 msgstr "Права доступа"
 
-#: saleor/dashboard/staff/forms.py:21
+#: saleor/dashboard/staff/forms.py:27
 msgctxt "Email"
 msgid "Email"
 msgstr "Email"
 
-#: saleor/dashboard/staff/forms.py:23
+#: saleor/dashboard/staff/forms.py:29
 msgctxt "User active toggle"
 msgid "User is active"
 msgstr "Пользователь активен"

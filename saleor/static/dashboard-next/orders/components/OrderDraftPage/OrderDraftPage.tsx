@@ -10,7 +10,8 @@ import * as React from "react";
 import { CardMenu } from "../../../components/CardMenu/CardMenu";
 import { ConfirmButtonTransitionState } from "../../../components/ConfirmButton/ConfirmButton";
 import { Container } from "../../../components/Container";
-import DateFormatter from "../../../components/DateFormatter";
+import { DateTime } from "../../../components/Date";
+import Grid from "../../../components/Grid";
 import PageHeader from "../../../components/PageHeader";
 import SaveButtonBar from "../../../components/SaveButtonBar";
 import Skeleton from "../../../components/Skeleton";
@@ -35,11 +36,6 @@ const styles = (theme: Theme) =>
     },
     menu: {
       marginRight: -theme.spacing.unit
-    },
-    root: {
-      display: "grid",
-      gridColumnGap: theme.spacing.unit * 2 + "px",
-      gridTemplateColumns: "9fr 4fr"
     }
   });
 
@@ -53,14 +49,6 @@ export interface OrderDraftPageProps extends WithStyles<typeof styles> {
     label: string;
   }>;
   saveButtonBarState: ConfirmButtonTransitionState;
-  variants: Array<{
-    id: string;
-    name: string;
-    sku: string;
-    stockQuantity: number;
-  }>;
-  variantsLoading: boolean;
-  fetchVariants: (value: string) => void;
   fetchUsers: (query: string) => void;
   onBack: () => void;
   onBillingAddressEdit: () => void;
@@ -119,13 +107,13 @@ const OrderDraftPage = withStyles(styles, { name: "OrderDraftPage" })(
       <div className={classes.date}>
         {order && order.created ? (
           <Typography variant="caption">
-            <DateFormatter date={order.created} />
+            <DateTime date={order.created} />
           </Typography>
         ) : (
           <Skeleton style={{ width: "10em" }} />
         )}
       </div>
-      <div className={classes.root}>
+      <Grid>
         <div>
           <OrderDraftDetails
             order={order}
@@ -152,7 +140,7 @@ const OrderDraftPage = withStyles(styles, { name: "OrderDraftPage" })(
             onShippingAddressEdit={onShippingAddressEdit}
           />
         </div>
-      </div>
+      </Grid>
       <SaveButtonBar
         state={saveButtonBarState}
         disabled={disabled || !maybe(() => order.canFinalize)}

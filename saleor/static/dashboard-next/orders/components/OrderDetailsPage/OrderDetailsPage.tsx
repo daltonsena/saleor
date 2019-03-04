@@ -10,7 +10,8 @@ import * as React from "react";
 import { CardMenu } from "../../../components/CardMenu/CardMenu";
 import { CardSpacer } from "../../../components/CardSpacer";
 import { Container } from "../../../components/Container";
-import DateFormatter from "../../../components/DateFormatter";
+import { DateTime } from "../../../components/Date";
+import Grid from "../../../components/Grid";
 import PageHeader from "../../../components/PageHeader";
 import Skeleton from "../../../components/Skeleton";
 import i18n from "../../../i18n";
@@ -35,11 +36,6 @@ const styles = (theme: Theme) =>
     },
     menu: {
       marginRight: -theme.spacing.unit
-    },
-    root: {
-      display: "grid",
-      gridColumnGap: theme.spacing.unit * 2 + "px",
-      gridTemplateColumns: "9fr 4fr"
     }
   });
 
@@ -114,13 +110,13 @@ const OrderDetailsPage = withStyles(styles, { name: "OrderDetailsPage" })(
         <div className={classes.date}>
           {order && order.created ? (
             <Typography variant="caption">
-              <DateFormatter date={order.created} />
+              <DateTime date={order.created} />
             </Typography>
           ) : (
             <Skeleton style={{ width: "10em" }} />
           )}
         </div>
-        <div className={classes.root}>
+        <Grid>
           <div>
             {unfulfilled.length > 0 && (
               <OrderUnfulfilledItems
@@ -173,7 +169,7 @@ const OrderDetailsPage = withStyles(styles, { name: "OrderDetailsPage" })(
             <CardSpacer />
             <OrderCustomerNote note={maybe(() => order.customerNote)} />
           </div>
-        </div>
+        </Grid>
       </Container>
     );
   }

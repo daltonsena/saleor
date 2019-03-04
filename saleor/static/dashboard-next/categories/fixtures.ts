@@ -1,3 +1,4 @@
+import { content } from "../storybook/stories/components/RichTextEditor";
 import { CategoryDetails_category } from "./types/CategoryDetails";
 
 export const categories = [
@@ -66,12 +67,16 @@ export const category: (
   placeholderImage: string
 ) => CategoryDetails_category = (placeholderImage: string) => ({
   __typename: "Category",
+  backgroundImage: {
+    __typename: "Image",
+    alt: "Alt text",
+    url: placeholderImage
+  },
   children: {
     __typename: "CategoryCountableConnection",
     edges: []
   },
-  description:
-    "Difference direction to treat anything worker occur. Miss in thousand Democrat civil hope set.",
+  descriptionJson: JSON.stringify(content),
   id: "Q2F0ZWdvcnk6NA==",
   name: "Coffees",
   parent: {

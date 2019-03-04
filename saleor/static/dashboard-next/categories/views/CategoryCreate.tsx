@@ -8,7 +8,7 @@ import { getMutationState, maybe } from "../../misc";
 import CategoryCreatePage from "../components/CategoryCreatePage";
 import { TypedCategoryCreateMutation } from "../mutations";
 import { CategoryCreate } from "../types/CategoryCreate";
-import { categoryUrl } from "../urls";
+import { categoryListUrl, categoryUrl } from "../urls";
 
 interface CategoryCreateViewProps {
   parentId: string;
@@ -46,12 +46,18 @@ export const CategoryCreateView: React.StatelessComponent<
                         []
                       )}
                       disabled={createCategoryResult.loading}
-                      onBack={() => navigate(categoryUrl(parentId))}
+                      onBack={() =>
+                        navigate(
+                          parentId ? categoryUrl(parentId) : categoryListUrl
+                        )
+                      }
                       onSubmit={formData =>
                         createCategory({
                           variables: {
                             input: {
-                              description: formData.description,
+                              descriptionJson: JSON.stringify(
+                                formData.description
+                              ),
                               name: formData.name,
                               seo: {
                                 description: formData.seoDescription,

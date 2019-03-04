@@ -15,6 +15,11 @@ export enum AuthorizationKeyType {
   GOOGLE_OAUTH2 = "GOOGLE_OAUTH2",
 }
 
+export enum DiscountValueTypeEnum {
+  FIXED = "FIXED",
+  PERCENTAGE = "PERCENTAGE",
+}
+
 export enum FulfillmentStatus {
   CANCELED = "CANCELED",
   FULFILLED = "FULFILLED",
@@ -86,6 +91,11 @@ export enum PermissionEnum {
   MANAGE_USERS = "MANAGE_USERS",
 }
 
+export enum SaleType {
+  FIXED = "FIXED",
+  PERCENTAGE = "PERCENTAGE",
+}
+
 export enum StockAvailability {
   IN_STOCK = "IN_STOCK",
   OUT_OF_STOCK = "OUT_OF_STOCK",
@@ -116,6 +126,28 @@ export enum TaxRateType {
   SOCIAL_HOUSING = "SOCIAL_HOUSING",
   STANDARD = "STANDARD",
   WATER = "WATER",
+  WINE = "WINE",
+}
+
+export enum VoucherDiscountValueType {
+  FIXED = "FIXED",
+  PERCENTAGE = "PERCENTAGE",
+}
+
+export enum VoucherType {
+  CATEGORY = "CATEGORY",
+  COLLECTION = "COLLECTION",
+  PRODUCT = "PRODUCT",
+  SHIPPING = "SHIPPING",
+  VALUE = "VALUE",
+}
+
+export enum VoucherTypeEnum {
+  CATEGORY = "CATEGORY",
+  COLLECTION = "COLLECTION",
+  PRODUCT = "PRODUCT",
+  SHIPPING = "SHIPPING",
+  VALUE = "VALUE",
 }
 
 export enum WeightUnitsEnum {
@@ -165,8 +197,15 @@ export interface AuthorizationKeyInput {
   password: string;
 }
 
+export interface CatalogueInput {
+  products?: (string | null)[] | null;
+  categories?: (string | null)[] | null;
+  collections?: (string | null)[] | null;
+}
+
 export interface CategoryInput {
   description?: string | null;
+  descriptionJson?: any | null;
   name?: string | null;
   slug?: string | null;
   seo?: SeoInput | null;
@@ -179,10 +218,11 @@ export interface CollectionCreateInput {
   name?: string | null;
   slug?: string | null;
   description?: string | null;
+  descriptionJson?: any | null;
   backgroundImage?: any | null;
   backgroundImageAlt?: string | null;
   seo?: SeoInput | null;
-  publishedDate?: any | null;
+  publicationDate?: any | null;
   products?: (string | null)[] | null;
 }
 
@@ -191,10 +231,11 @@ export interface CollectionInput {
   name?: string | null;
   slug?: string | null;
   description?: string | null;
+  descriptionJson?: any | null;
   backgroundImage?: any | null;
   backgroundImageAlt?: string | null;
   seo?: SeoInput | null;
-  publishedDate?: any | null;
+  publicationDate?: any | null;
 }
 
 export interface CustomerInput {
@@ -260,6 +301,16 @@ export interface OrderUpdateShippingInput {
   shippingMethod?: string | null;
 }
 
+export interface PageInput {
+  slug?: string | null;
+  title?: string | null;
+  content?: string | null;
+  contentJson?: any | null;
+  isPublished?: boolean | null;
+  publicationDate?: string | null;
+  seo?: SeoInput | null;
+}
+
 export interface ProductTypeInput {
   name?: string | null;
   hasVariants?: boolean | null;
@@ -280,6 +331,17 @@ export interface ProductVariantInput {
   weight?: any | null;
 }
 
+export interface SaleInput {
+  name?: string | null;
+  type?: DiscountValueTypeEnum | null;
+  value?: any | null;
+  products?: (string | null)[] | null;
+  categories?: (string | null)[] | null;
+  collections?: (string | null)[] | null;
+  startDate?: any | null;
+  endDate?: any | null;
+}
+
 export interface SeoInput {
   title?: string | null;
   description?: string | null;
@@ -290,6 +352,7 @@ export interface ShopSettingsInput {
   description?: string | null;
   includeTaxesInPrices?: boolean | null;
   displayGrossPrices?: boolean | null;
+  chargeTaxesOnShipping?: boolean | null;
   trackInventoryByDefault?: boolean | null;
   defaultWeightUnit?: WeightUnitsEnum | null;
 }
@@ -327,6 +390,21 @@ export interface UserCreateInput {
   isActive?: boolean | null;
   note?: string | null;
   sendPasswordEmail?: boolean | null;
+}
+
+export interface VoucherInput {
+  type?: VoucherTypeEnum | null;
+  name?: string | null;
+  code?: string | null;
+  startDate?: any | null;
+  endDate?: any | null;
+  discountValueType?: DiscountValueTypeEnum | null;
+  discountValue?: any | null;
+  products?: (string | null)[] | null;
+  collections?: (string | null)[] | null;
+  categories?: (string | null)[] | null;
+  minAmountSpent?: any | null;
+  countries?: (string | null)[] | null;
 }
 
 //==============================================================

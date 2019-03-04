@@ -30,8 +30,9 @@ from ...menu.models import Menu
 from ...order.models import Fulfillment, Order
 from ...order.utils import update_order_status
 from ...page.models import Page
-from ...payment.models import Payment
-from ...payment.utils import get_billing_data
+from ...payment.utils import (
+    create_payment, gateway_authorize, gateway_capture, gateway_refund,
+    gateway_void)
 from ...product.models import (
     Attribute, AttributeValue, Category, Collection, Product, ProductImage,
     ProductType, ProductVariant)
@@ -183,6 +184,8 @@ def create_products(products_data, placeholder_dir, create_images):
         defaults['weight'] = get_weight(defaults['weight'])
         defaults['category_id'] = defaults.pop('category')
         defaults['product_type_id'] = defaults.pop('product_type')
+        defaults['price'] = get_in_default_currency(
+            defaults, 'price', settings.DEFAULT_CURRENCY)
         defaults['attributes'] = json.loads(defaults['attributes'])
         product, _ = Product.objects.update_or_create(pk=pk, defaults=defaults)
 
@@ -203,7 +206,17 @@ def create_product_variants(variants_data):
             continue
         defaults['product_id'] = product_id
         defaults['attributes'] = json.loads(defaults['attributes'])
+        defaults['price_override'] = get_in_default_currency(
+            defaults, 'price_override', settings.DEFAULT_CURRENCY)
+        defaults['cost_price'] = get_in_default_currency(
+            defaults, 'cost_price', settings.DEFAULT_CURRENCY)
         ProductVariant.objects.update_or_create(pk=pk, defaults=defaults)
+
+
+def get_in_default_currency(defaults, field, currency):
+    if field in defaults and defaults[field] is not None:
+        return Money(defaults[field].amount, currency)
+    return None
 
 
 def create_products_by_schema(placeholder_dir, create_images):
@@ -299,31 +312,31 @@ def create_fake_user():
 # We don't want to spam the console with payment confirmations sent to
 # fake customers.
 @patch('saleor.order.emails.send_payment_confirmation.delay')
-def create_payment(mock_email_confirmation, order):
-    payment = Payment.objects.create(
+def create_fake_payment(mock_email_confirmation, order):
+    payment = create_payment(
         gateway=settings.DUMMY,
         customer_ip_address=fake.ipv4(),
-        is_active=True,
+        email=order.user_email,
         order=order,
-        token=str(uuid.uuid4()),
+        payment_token=str(uuid.uuid4()),
         total=order.total.gross.amount,
         currency=order.total.gross.currency,
-        **get_billing_data(order))
+        billing_address=order.billing_address)
 
     # Create authorization transaction
-    payment.authorize(payment.token)
+    gateway_authorize(payment, payment.token)
     # 20% chance to void the transaction at this stage
     if random.choice([0, 0, 0, 0, 1]):
-        payment.void()
+        gateway_void(payment)
         return payment
     # 25% to end the payment at the authorization stage
     if not random.choice([1, 1, 1, 0]):
         return payment
     # Create capture transaction
-    payment.capture()
+    gateway_capture(payment)
     # 25% to refund the payment
     if random.choice([0, 0, 0, 1]):
-        payment.refund()
+        gateway_refund(payment)
     return payment
 
 
@@ -396,7 +409,7 @@ def create_fake_order(discounts, taxes):
     order.weight = weight
     order.save()
 
-    create_payment(order=order)
+    create_fake_payment(order=order)
     create_fulfillments(order)
     return order
 
@@ -442,8 +455,8 @@ def create_shipping_zone(
             type=(
                 ShippingMethodType.PRICE_BASED if random.randint(0, 1)
                 else ShippingMethodType.WEIGHT_BASED),
-            minimum_order_price=fake.money(), maximum_order_price=None,
-            minimum_order_weight=fake.weight(), maximum_order_weight=None)
+            minimum_order_price=0, maximum_order_price=None,
+            minimum_order_weight=0, maximum_order_weight=None)
         for name in shipping_methods_names])
     return 'Shipping Zone: %s' % shipping_zone
 
@@ -561,7 +574,7 @@ def create_page():
     <h3>A modular, high performance e-commerce storefront built with GraphQL, Django, and ReactJS.</h3>
     <p>Saleor is a rapidly-growing open source e-commerce platform that has served high-volume companies from branches like publishing and apparel since 2012. Based on Python and Django, the latest major update introduces a modular front end with a GraphQL API and storefront and dashboard written in React to make Saleor a full-functionality open source e-commerce.</p>
     """
-    page_data = {'content': content, 'title': 'About', 'is_visible': True}
+    page_data = {'content': content, 'title': 'About', 'is_published': True}
     page, dummy = Page.objects.get_or_create(slug='about', **page_data)
     yield 'Page %s created' % page.slug
 

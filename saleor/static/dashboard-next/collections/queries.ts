@@ -9,10 +9,6 @@ import {
   CollectionList,
   CollectionListVariables
 } from "./types/CollectionList";
-import {
-  SearchProducts,
-  SearchProductsVariables
-} from "./types/SearchProducts";
 
 export const collectionFragment = gql`
   fragment CollectionFragment on Collection {
@@ -30,10 +26,29 @@ export const collectionDetailsFragment = gql`
       alt
       url
     }
-    description
+    descriptionJson
     seoDescription
     seoTitle
     isPublished
+  }
+`;
+
+// This fragment is used to make sure that product's fields that are returned
+// are always the same - fixes apollo cache
+// https://github.com/apollographql/apollo-client/issues/2496
+// https://github.com/apollographql/apollo-client/issues/3468
+export const collectionProductFragment = gql`
+  fragment CollectionProductFragment on Product {
+    id
+    isPublished
+    name
+    productType {
+      id
+      name
+    }
+    thumbnail {
+      url
+    }
   }
 `;
 
@@ -70,6 +85,7 @@ export const TypedCollectionListQuery = TypedQuery<
 
 export const collectionDetails = gql`
   ${collectionDetailsFragment}
+  ${collectionProductFragment}
   query CollectionDetails(
     $id: ID!
     $first: Int
@@ -82,16 +98,7 @@ export const collectionDetails = gql`
       products(first: $first, after: $after, before: $before, last: $last) {
         edges {
           node {
-            id
-            isPublished
-            name
-            productType {
-              id
-              name
-            }
-            thumbnail {
-              url
-            }
+            ...CollectionProductFragment
           }
         }
         pageInfo {
@@ -113,20 +120,3 @@ export const TypedCollectionDetailsQuery = TypedQuery<
   CollectionDetails,
   CollectionDetailsVariables
 >(collectionDetails);
-
-export const searchProducts = gql`
-  query SearchProducts($query: String!) {
-    products(first: 5, query: $query) {
-      edges {
-        node {
-          id
-          name
-        }
-      }
-    }
-  }
-`;
-export const TypedSearchProductsQuery = TypedQuery<
-  SearchProducts,
-  SearchProductsVariables
->(searchProducts);

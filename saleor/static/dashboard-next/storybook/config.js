@@ -7,7 +7,8 @@ function loadStories() {
   require("./stories/components/AddressEdit");
   require("./stories/components/AddressFormatter");
   require("./stories/components/CardMenu");
-  require("./stories/components/DateFormatter");
+  require("./stories/components/Date");
+  require("./stories/components/DateTime");
   require("./stories/components/EditableTableCell");
   require("./stories/components/ErrorMessageCard");
   require("./stories/components/ErrorPage");
@@ -20,6 +21,7 @@ function loadStories() {
   require("./stories/components/Percent");
   require("./stories/components/PhoneField");
   require("./stories/components/PriceField");
+  require("./stories/components/RichTextEditor");
   require("./stories/components/SaveButtonBar");
   require("./stories/components/SingleAutocompleteSelectField");
   require("./stories/components/SingleSelectField");
@@ -52,6 +54,15 @@ function loadStories() {
   require("./stories/customers/CustomerDetailsPage");
   require("./stories/customers/CustomerListPage");
 
+  // Discounts
+  require("./stories/discounts/DiscountCountrySelectDialog");
+  require("./stories/discounts/SaleCreatePage");
+  require("./stories/discounts/SaleDetailsPage");
+  require("./stories/discounts/SaleListPage");
+  require("./stories/discounts/VoucherCreatePage");
+  require("./stories/discounts/VoucherDetailsPage");
+  require("./stories/discounts/VoucherListPage");
+
   // Homepage
   require("./stories/home/HomePage");
 
@@ -60,11 +71,8 @@ function loadStories() {
   require("./stories/staff/StaffDetailsPage");
 
   // Pages
-  require("./stories/pages/PageContent");
-  require("./stories/pages/PageDeleteDialog");
-  require("./stories/pages/PageDetailsPage");
-  require("./stories/pages/PageListPage");
-  require("./stories/pages/PageProperties");
+  require("./stories/pages/PageDetailsPage")
+  require("./stories/pages/PageListPage")
 
   // Products
   require("./stories/products/ProductCreatePage");
@@ -72,6 +80,7 @@ function loadStories() {
   require("./stories/products/ProductListCard");
   require("./stories/products/ProductUpdatePage");
   require("./stories/products/ProductVariantCreatePage");
+  require("./stories/products/ProductVariantImageSelectDialog");
   require("./stories/products/ProductVariantPage");
 
   // Orders
@@ -94,10 +103,6 @@ function loadStories() {
   require("./stories/orders/OrderProductAddDialog");
   require("./stories/orders/OrderShippingMethodEditDialog");
 
-  // Vouchers
-  require("./stories/vouchers/VoucherDetailsPage");
-  require("./stories/vouchers/VoucherListPage");
-
   // Product types
   require("./stories/productTypes/ProductTypeAttributeEditDialog");
   require("./stories/productTypes/ProductTypeCreatePage");
@@ -107,6 +112,10 @@ function loadStories() {
   // Site settings
   require("./stories/siteSettings/SiteSettingsKeyDialog");
   require("./stories/siteSettings/SiteSettingsPage");
+  
+  // Taxes
+  require("./stories/taxes/CountryListPage");
+  require("./stories/taxes/CountryTaxesPage");
 }
 
 configure(loadStories, module);
