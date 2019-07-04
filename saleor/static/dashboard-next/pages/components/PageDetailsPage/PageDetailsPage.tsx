@@ -1,26 +1,32 @@
-import { RawDraftContentState } from "draft-js";
-import * as React from "react";
+import {
+  ContentState,
+  convertFromRaw,
+  convertToRaw,
+  RawDraftContentState
+} from "draft-js";
+import React from "react";
 
-import CardSpacer from "../../../components/CardSpacer";
-import { ConfirmButtonTransitionState } from "../../../components/ConfirmButton";
-import Container from "../../../components/Container";
-import Form from "../../../components/Form";
-import Grid from "../../../components/Grid";
-import PageHeader from "../../../components/PageHeader";
-import SaveButtonBar from "../../../components/SaveButtonBar";
-import SeoForm from "../../../components/SeoForm";
+import AppHeader from "@saleor/components/AppHeader";
+import CardSpacer from "@saleor/components/CardSpacer";
+import { ConfirmButtonTransitionState } from "@saleor/components/ConfirmButton";
+import Container from "@saleor/components/Container";
+import Form from "@saleor/components/Form";
+import Grid from "@saleor/components/Grid";
+import PageHeader from "@saleor/components/PageHeader";
+import SaveButtonBar from "@saleor/components/SaveButtonBar";
+import SeoForm from "@saleor/components/SeoForm";
+import VisibilityCard from "@saleor/components/VisibilityCard";
 import i18n from "../../../i18n";
 import { maybe } from "../../../misc";
 import { UserError } from "../../../types";
 import { PageDetails_page } from "../../types/PageDetails";
-import PageAvailability from "../PageAvailability";
 import PageInfo from "../PageInfo";
 import PageSlug from "../PageSlug";
 
 export interface FormData {
-  availableOn: string;
   content: RawDraftContentState;
-  isVisible: boolean;
+  isPublished: boolean;
+  publicationDate: string;
   seoDescription: string;
   seoTitle: string;
   slug: string;
@@ -47,18 +53,22 @@ const PageDetailsPage: React.StatelessComponent<PageDetailsPageProps> = ({
   onSubmit
 }) => {
   const initialForm: FormData = {
-    availableOn: maybe(() => page.availableOn, ""),
-    content: maybe(() => JSON.parse(page.contentJson)),
-    isVisible: maybe(() => page.isVisible, false),
-    seoDescription: maybe(() => page.seoDescription, ""),
-    seoTitle: maybe(() => page.seoTitle, ""),
+    content: maybe(
+      () => JSON.parse(page.contentJson),
+      convertToRaw(ContentState.createFromText(""))
+    ),
+    isPublished: maybe(() => page.isPublished, false),
+    publicationDate: maybe(() => page.publicationDate, ""),
+    seoDescription: maybe(() => page.seoDescription || "", ""),
+    seoTitle: maybe(() => page.seoTitle || "", ""),
     slug: maybe(() => page.slug, ""),
     title: maybe(() => page.title, "")
   };
   return (
     <Form errors={errors} initial={initialForm} onSubmit={onSubmit}>
       {({ change, data, errors: formErrors, hasChanged, submit }) => (
-        <Container width="md">
+        <Container>
+          <AppHeader onBack={onBack}>{i18n.t("Pages")}</AppHeader>
           <PageHeader
             title={
               page === null
@@ -67,7 +77,6 @@ const PageDetailsPage: React.StatelessComponent<PageDetailsPageProps> = ({
                   })
                 : maybe(() => page.title)
             }
-            onBack={onBack}
           />
           <Grid>
             <div>
@@ -82,7 +91,11 @@ const PageDetailsPage: React.StatelessComponent<PageDetailsPageProps> = ({
               <SeoForm
                 description={data.seoDescription}
                 disabled={disabled}
-                descriptionPlaceholder={data.title}
+                descriptionPlaceholder={maybe(() => {
+                  return convertFromRaw(data.content)
+                    .getPlainText()
+                    .slice(0, 300);
+                }, "")}
                 onChange={change}
                 title={data.seoTitle}
                 titlePlaceholder={data.title}
@@ -99,7 +112,7 @@ const PageDetailsPage: React.StatelessComponent<PageDetailsPageProps> = ({
                 onChange={change}
               />
               <CardSpacer />
-              <PageAvailability
+              <VisibilityCard
                 data={data}
                 disabled={disabled}
                 errors={formErrors}
@@ -111,7 +124,7 @@ const PageDetailsPage: React.StatelessComponent<PageDetailsPageProps> = ({
             disabled={disabled || !hasChanged}
             state={saveButtonBarState}
             onCancel={onBack}
-            onDelete={onRemove}
+            onDelete={page === null ? undefined : onRemove}
             onSave={submit}
           />
         </Container>
