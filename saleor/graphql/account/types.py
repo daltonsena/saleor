@@ -2,7 +2,7 @@ import graphene
 import graphene_django_optimizer as gql_optimizer
 from django.contrib.auth import get_user_model
 from graphene import relay
-from graphql_jwt.decorators import permission_required
+from graphql_jwt.decorators import login_required, permission_required
 
 from ...account import models
 from ...checkout.utils import get_user_checkout
@@ -182,6 +182,10 @@ class User(CountableDjangoObjectType):
         ),
         model_field="events",
     )
+    stored_payment_sources = graphene.List(
+        "saleor.graphql.payment.types.PaymentSource",
+        description="List of stored payment sources",
+    )
 
     class Meta:
         description = "Represents user data."
@@ -208,7 +212,7 @@ class User(CountableDjangoObjectType):
 
     @staticmethod
     def resolve_checkout(root: models.User, _info, **_kwargs):
-        return get_user_checkout(root)
+        return get_user_checkout(root)[0]
 
     @staticmethod
     def resolve_gift_cards(root: models.User, info, **_kwargs):
@@ -251,6 +255,13 @@ class User(CountableDjangoObjectType):
                 rendition_key_set="user_avatars",
                 info=info,
             )
+
+    @staticmethod
+    @login_required
+    def resolve_stored_payment_sources(root: models.User, _info):
+        from .resolvers import resolve_payment_sources
+
+        return resolve_payment_sources(root)
 
 
 class ChoiceValue(graphene.ObjectType):

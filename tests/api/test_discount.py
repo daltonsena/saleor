@@ -5,6 +5,7 @@ import graphene
 import pytest
 from django.utils import timezone
 from django_countries import countries
+from freezegun import freeze_time
 
 from saleor.discount import DiscountValueType, VoucherType
 from saleor.discount.models import Sale, Voucher
@@ -81,6 +82,7 @@ def test_voucher_query(
                     startDate
                     discountValueType
                     discountValue
+                    applyOncePerCustomer
                     countries {
                         code
                         country
@@ -100,6 +102,7 @@ def test_voucher_query(
     assert data["name"] == voucher_countries.name
     assert data["code"] == voucher_countries.code
     assert data["usageLimit"] == voucher_countries.usage_limit
+    assert data["applyOncePerCustomer"] == voucher_countries.apply_once_per_customer
     assert data["used"] == voucher_countries.used
     assert data["startDate"] == voucher_countries.start_date.isoformat()
     assert data["discountValueType"] == voucher_countries.discount_value_type.upper()
@@ -139,17 +142,18 @@ def test_sale_query(staff_api_client, sale, permission_manage_discounts):
 CREATE_VOUCHER_MUTATION = """
 mutation  voucherCreate(
     $type: VoucherTypeEnum, $name: String, $code: String,
-    $discountValueType: DiscountValueTypeEnum,
-    $discountValue: Decimal, $minAmountSpent: Decimal,
+    $discountValueType: DiscountValueTypeEnum, $usageLimit: Int,
+    $discountValue: Decimal, $minAmountSpent: Decimal, $minCheckoutItemsQuantity: Int,
     $startDate: DateTime, $endDate: DateTime, $applyOncePerOrder: Boolean,
-    $usageLimit: Int) {
+    $applyOncePerCustomer: Boolean) {
         voucherCreate(input: {
                 name: $name, type: $type, code: $code,
                 discountValueType: $discountValueType,
-                discountValue: $discountValue,
-                minAmountSpent: $minAmountSpent,
-                startDate: $startDate, endDate: $endDate,
-                applyOncePerOrder: $applyOncePerOrder, usageLimit: $usageLimit}) {
+                discountValue: $discountValue, minAmountSpent: $minAmountSpent,
+                minCheckoutItemsQuantity: $minCheckoutItemsQuantity,
+                startDate: $startDate, endDate: $endDate, usageLimit: $usageLimit
+                applyOncePerOrder: $applyOncePerOrder,
+                applyOncePerCustomer: $applyOncePerCustomer}) {
             errors {
                 field
                 message
@@ -159,18 +163,21 @@ mutation  voucherCreate(
                 minAmountSpent {
                     amount
                 }
+                minCheckoutItemsQuantity
                 name
                 code
                 discountValueType
                 startDate
                 endDate
                 applyOncePerOrder
+                applyOncePerCustomer
             }
         }
     }
 """
 
 
+@freeze_time("2010-05-31 12:00:01")
 def test_create_voucher(staff_api_client, permission_manage_discounts):
     start_date = timezone.now() - timedelta(days=365)
     end_date = timezone.now() + timedelta(days=365)
@@ -181,9 +188,11 @@ def test_create_voucher(staff_api_client, permission_manage_discounts):
         "discountValueType": DiscountValueTypeEnum.FIXED.name,
         "discountValue": 10.12,
         "minAmountSpent": 1.12,
+        "minCheckoutItemsQuantity": 10,
         "startDate": start_date.isoformat(),
         "endDate": end_date.isoformat(),
         "applyOncePerOrder": True,
+        "applyOncePerCustomer": True,
         "usageLimit": 3,
     }
 
@@ -200,9 +209,11 @@ def test_create_voucher(staff_api_client, permission_manage_discounts):
     assert voucher.start_date == start_date
     assert voucher.end_date == end_date
     assert voucher.apply_once_per_order
+    assert voucher.apply_once_per_customer
     assert voucher.usage_limit == 3
 
 
+@freeze_time("2010-05-31 12:00:01")
 def test_create_voucher_with_empty_code(staff_api_client, permission_manage_discounts):
     start_date = timezone.now() - timedelta(days=365)
     end_date = timezone.now() + timedelta(days=365)
@@ -227,6 +238,7 @@ def test_create_voucher_with_empty_code(staff_api_client, permission_manage_disc
     assert data["code"] != ""
 
 
+@freeze_time("2010-05-31 12:00:01")
 def test_create_voucher_with_deprecated_type(
     staff_api_client, permission_manage_discounts
 ):
@@ -254,6 +266,7 @@ def test_create_voucher_with_deprecated_type(
     assert data["type"] == VoucherTypeEnum.ENTIRE_ORDER.name
 
 
+@freeze_time("2010-05-31 12:00:01")
 def test_create_voucher_with_existing_gift_card_code(
     staff_api_client, gift_card, permission_manage_discounts
 ):
@@ -281,6 +294,7 @@ def test_create_voucher_with_existing_gift_card_code(
     assert errors[0]["field"] == "promoCode"
 
 
+@freeze_time("2010-05-31 12:00:01")
 def test_create_voucher_with_existing_voucher_code(
     staff_api_client, voucher_shipping_type, permission_manage_discounts
 ):
@@ -311,10 +325,11 @@ def test_update_voucher(staff_api_client, voucher, permission_manage_discounts):
     query = """
     mutation  voucherUpdate($code: String,
         $discountValueType: DiscountValueTypeEnum, $id: ID!,
-        $applyOncePerOrder: Boolean) {
+        $applyOncePerOrder: Boolean, $minCheckoutItemsQuantity: Int) {
             voucherUpdate(id: $id, input: {
                 code: $code, discountValueType: $discountValueType,
-                applyOncePerOrder: $applyOncePerOrder
+                applyOncePerOrder: $applyOncePerOrder,
+                minCheckoutItemsQuantity: $minCheckoutItemsQuantity
                 }) {
                 errors {
                     field
@@ -324,6 +339,7 @@ def test_update_voucher(staff_api_client, voucher, permission_manage_discounts):
                     code
                     discountValueType
                     applyOncePerOrder
+                    minCheckoutItemsQuantity
                 }
             }
         }
@@ -338,6 +354,7 @@ def test_update_voucher(staff_api_client, voucher, permission_manage_discounts):
         "code": "testcode123",
         "discountValueType": DiscountValueTypeEnum.PERCENTAGE.name,
         "applyOncePerOrder": apply_once_per_order,
+        "minCheckoutItemsQuantity": 10,
     }
 
     response = staff_api_client.post_graphql(
@@ -348,6 +365,7 @@ def test_update_voucher(staff_api_client, voucher, permission_manage_discounts):
     assert data["code"] == "testcode123"
     assert data["discountValueType"] == DiscountValueType.PERCENTAGE.upper()
     assert data["applyOncePerOrder"] == apply_once_per_order
+    assert data["minCheckoutItemsQuantity"] == 10
 
 
 def test_voucher_delete_mutation(
@@ -534,6 +552,7 @@ def test_voucher_remove_no_catalogues(
     assert voucher.collections.exists()
 
 
+@freeze_time("2010-05-31 12:00:01")
 def test_create_sale(staff_api_client, permission_manage_discounts):
     query = """
     mutation  saleCreate(
@@ -774,6 +793,7 @@ def test_sale_remove_no_catalogues(
     assert sale.collections.exists()
 
 
+@freeze_time("2019-05-31 12:00:01")
 @pytest.mark.parametrize(
     "voucher_filter, start_date, end_date, count",
     [
@@ -971,6 +991,7 @@ def test_query_vouchers_with_filter_search(
     assert len(data) == count
 
 
+@freeze_time("2019-05-31 12:00:01")
 @pytest.mark.parametrize(
     "sale_filter, start_date, end_date, count",
     [

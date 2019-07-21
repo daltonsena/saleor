@@ -16,7 +16,6 @@ from ..discount.models import NotApplicable
 from ..order import FulfillmentStatus, OrderStatus, emails
 from ..order.models import Fulfillment, FulfillmentLine, Order, OrderLine
 from ..payment import ChargeStatus
-from ..payment.utils import gateway_refund, gateway_void
 from ..product.utils import (
     allocate_stock,
     deallocate_stock,
@@ -24,6 +23,7 @@ from ..product.utils import (
     increase_stock,
 )
 from ..product.utils.digital_products import get_default_digital_content_settings
+from ..shipping.models import ShippingMethod
 from . import events
 
 
@@ -197,6 +197,8 @@ def cancel_order(user, order, restock):
     payments = order.payments.filter(is_active=True).exclude(
         charge_status=ChargeStatus.FULLY_REFUNDED
     )
+
+    from ..payment.utils import gateway_refund, gateway_void
 
     for payment in payments:
         if payment.can_refund():
@@ -373,3 +375,9 @@ def sum_order_totals(qs):
     zero = Money(0, currency=settings.DEFAULT_CURRENCY)
     taxed_zero = TaxedMoney(zero, zero)
     return sum([order.total for order in qs], taxed_zero)
+
+
+def get_valid_shipping_methods_for_order(order: Order):
+    return ShippingMethod.objects.applicable_shipping_methods_for_instance(
+        order, price=order.get_subtotal().gross
+    )
