@@ -5,8 +5,7 @@ from graphene import relay
 
 from ...menu import models
 from ..core.connection import CountableDjangoObjectType
-from ..translations.enums import LanguageCodeEnum
-from ..translations.resolvers import resolve_translation
+from ..translations.fields import TranslationField
 from ..translations.types import MenuItemTranslation
 
 
@@ -23,8 +22,10 @@ class Menu(CountableDjangoObjectType):
     )
 
     class Meta:
-        description = """Represents a single menu - an object that is used
-               to help navigate through the store."""
+        description = (
+            "Represents a single menu - an object that is used to help navigate "
+            "through the store."
+        )
         interfaces = [relay.Node]
         only_fields = ["id", "name"]
         model = models.Menu
@@ -32,7 +33,7 @@ class Menu(CountableDjangoObjectType):
     @staticmethod
     def resolve_items(root: models.Menu, _info, **_kwargs):
         if hasattr(root, "prefetched_items"):
-            return root.prefetched_items
+            return root.prefetched_items  # type: ignore
         return root.items.filter(level=0)
 
 
@@ -41,22 +42,13 @@ class MenuItem(CountableDjangoObjectType):
         graphene.List(lambda: MenuItem), model_field="children"
     )
     url = graphene.String(description="URL to the menu item.")
-    translation = graphene.Field(
-        MenuItemTranslation,
-        language_code=graphene.Argument(
-            LanguageCodeEnum,
-            description="A language code to return the translation for.",
-            required=True,
-        ),
-        description=(
-            "Returns translated Menu item fields " "for the given language code."
-        ),
-        resolver=resolve_translation,
-    )
+    translation = TranslationField(MenuItemTranslation, type_name="menu item")
 
     class Meta:
-        description = """Represents a single item of the related menu.
-        Can store categories, collection or pages."""
+        description = (
+            "Represents a single item of the related menu. Can store categories, "
+            "collection or pages."
+        )
         interfaces = [relay.Node]
         only_fields = [
             "category",
@@ -67,7 +59,6 @@ class MenuItem(CountableDjangoObjectType):
             "name",
             "page",
             "parent",
-            "sort_order",
         ]
         model = models.MenuItem
 

@@ -5,7 +5,7 @@ from ...order.models import Order
 from ..core.filters import ListObjectTypeFilter, ObjectTypeFilter
 from ..core.types.common import DateRangeInput
 from ..payment.enums import PaymentChargeStatusEnum
-from ..utils import filter_by_query_param
+from ..utils import filter_by_query_param, filter_range_field
 from .enums import OrderStatusFilter
 
 
@@ -47,21 +47,30 @@ def filter_customer(qs, _, value):
 
 
 def filter_created_range(qs, _, value):
-    gte, lte = value.get("gte"), value.get("lte")
-    if gte:
-        qs = qs.filter(created__date__gte=gte)
-    if lte:
-        qs = qs.filter(created__date__lte=lte)
+    return filter_range_field(qs, "created__date", value)
+
+
+def filter_order_search(qs, _, value):
+    order_fields = [
+        "pk",
+        "discount_name",
+        "translated_discount_name",
+        "user_email",
+        "user__first_name",
+        "user__last_name",
+    ]
+    qs = filter_by_query_param(qs, value, order_fields)
     return qs
 
 
 class DraftOrderFilter(django_filters.FilterSet):
     customer = django_filters.CharFilter(method=filter_customer)
     created = ObjectTypeFilter(input_class=DateRangeInput, method=filter_created_range)
+    search = django_filters.CharFilter(method=filter_order_search)
 
     class Meta:
         model = Order
-        fields = ["customer", "created"]
+        fields = ["customer", "created", "search"]
 
 
 class OrderFilter(DraftOrderFilter):
@@ -71,7 +80,8 @@ class OrderFilter(DraftOrderFilter):
     status = ListObjectTypeFilter(input_class=OrderStatusFilter, method=filter_status)
     customer = django_filters.CharFilter(method=filter_customer)
     created = ObjectTypeFilter(input_class=DateRangeInput, method=filter_created_range)
+    search = django_filters.CharFilter(method=filter_order_search)
 
     class Meta:
         model = Order
-        fields = ["payment_status", "status", "customer", "created"]
+        fields = ["payment_status", "status", "customer", "created", "search"]

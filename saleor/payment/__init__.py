@@ -1,17 +1,14 @@
-import importlib
 from enum import Enum
-
-from django.conf import settings
-from django.core.exceptions import ImproperlyConfigured
-from django.utils.translation import pgettext_lazy
-
-from .interface import GatewayConfig
 
 
 class PaymentError(Exception):
-    def __init__(self, message):
-        super(PaymentError, self).__init__(message)
+    def __init__(self, message, code=None):
+        super(PaymentError, self).__init__(message, code)
         self.message = message
+        self.code = code
+
+    def __str__(self):
+        return self.message
 
 
 class GatewayError(IOError):
@@ -21,7 +18,7 @@ class GatewayError(IOError):
 class CustomPaymentChoices:
     MANUAL = "manual"
 
-    CHOICES = [(MANUAL, pgettext_lazy("Custom payment choice type", "Manual"))]
+    CHOICES = [(MANUAL, "Manual")]
 
 
 class OperationType(Enum):
@@ -30,6 +27,7 @@ class OperationType(Enum):
     CAPTURE = "capture"
     VOID = "void"
     REFUND = "refund"
+    CONFIRM = "confirm"
 
 
 class TransactionError(Enum):
@@ -63,14 +61,16 @@ class TransactionKind:
     CAPTURE = "capture"
     VOID = "void"
     REFUND = "refund"
+    CONFIRM = "confirm"
     # FIXME we could use another status like WAITING_FOR_AUTH for transactions
     # Which were authorized, but needs to be confirmed manually by staff
     # eg. Braintree with "submit_for_settlement" enabled
     CHOICES = [
-        (AUTH, pgettext_lazy("transaction kind", "Authorization")),
-        (REFUND, pgettext_lazy("transaction kind", "Refund")),
-        (CAPTURE, pgettext_lazy("transaction kind", "Capture")),
-        (VOID, pgettext_lazy("transaction kind", "Void")),
+        (AUTH, "Authorization"),
+        (REFUND, "Refund"),
+        (CAPTURE, "Capture"),
+        (VOID, "Void"),
+        (CONFIRM, "Confirm"),
     ]
 
 
@@ -94,43 +94,9 @@ class ChargeStatus:
     FULLY_REFUNDED = "fully-refunded"
 
     CHOICES = [
-        (NOT_CHARGED, pgettext_lazy("payment status", "Not charged")),
-        (PARTIALLY_CHARGED, pgettext_lazy("payment status", "Partially charged")),
-        (FULLY_CHARGED, pgettext_lazy("payment status", "Fully charged")),
-        (PARTIALLY_REFUNDED, pgettext_lazy("payment status", "Partially refunded")),
-        (FULLY_REFUNDED, pgettext_lazy("payment status", "Fully refunded")),
+        (NOT_CHARGED, "Not charged"),
+        (PARTIALLY_CHARGED, "Partially charged"),
+        (FULLY_CHARGED, "Fully charged"),
+        (PARTIALLY_REFUNDED, "Partially refunded"),
+        (FULLY_REFUNDED, "Fully refunded"),
     ]
-
-
-GATEWAYS_ENUM = Enum(
-    "GatewaysEnum", {key.upper(): key.lower() for key in settings.PAYMENT_GATEWAYS}
-)
-
-
-def get_payment_gateway(gateway_name):
-    if gateway_name not in settings.CHECKOUT_PAYMENT_GATEWAYS:
-        raise ValueError("%s is not allowed gateway" % gateway_name)
-    if gateway_name not in settings.PAYMENT_GATEWAYS:
-        raise ImproperlyConfigured(
-            "Payment gateway %s is not configured." % gateway_name
-        )
-
-    gateway_module = importlib.import_module(
-        settings.PAYMENT_GATEWAYS[gateway_name]["module"]
-    )
-
-    if "config" not in settings.PAYMENT_GATEWAYS[gateway_name]:
-        raise ImproperlyConfigured(
-            "Payment gateway %s should have own configuration" % gateway_name
-        )
-
-    gateway_config = settings.PAYMENT_GATEWAYS[gateway_name]["config"]
-    config = GatewayConfig(
-        gateway_name=gateway_name,
-        auto_capture=gateway_config["auto_capture"],
-        template_path=gateway_config["template_path"],
-        connection_params=gateway_config["connection_params"],
-        store_customer=gateway_config["store_card"],
-    )
-
-    return gateway_module, config

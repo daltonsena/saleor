@@ -1,8 +1,11 @@
 import graphene
 from django.core.exceptions import ValidationError
 
+from ....core.permissions import OrderPermissions
 from ....order import OrderStatus, models
+from ....order.error_codes import OrderErrorCode
 from ...core.mutations import ModelBulkDeleteMutation
+from ...core.types.common import OrderError
 
 
 class DraftOrderBulkDelete(ModelBulkDeleteMutation):
@@ -14,12 +17,21 @@ class DraftOrderBulkDelete(ModelBulkDeleteMutation):
     class Meta:
         description = "Deletes draft orders."
         model = models.Order
-        permissions = ("order.manage_orders",)
+        permissions = (OrderPermissions.MANAGE_ORDERS,)
+        error_type_class = OrderError
+        error_type_field = "order_errors"
 
     @classmethod
     def clean_instance(cls, info, instance):
         if instance.status != OrderStatus.DRAFT:
-            raise ValidationError({"id": "Cannot delete non-draft orders."})
+            raise ValidationError(
+                {
+                    "id": ValidationError(
+                        "Cannot delete non-draft orders.",
+                        code=OrderErrorCode.CANNOT_DELETE,
+                    )
+                }
+            )
 
 
 class DraftOrderLinesBulkDelete(ModelBulkDeleteMutation):
@@ -31,9 +43,18 @@ class DraftOrderLinesBulkDelete(ModelBulkDeleteMutation):
     class Meta:
         description = "Deletes order lines."
         model = models.OrderLine
-        permissions = ("order.manage_orders",)
+        permissions = (OrderPermissions.MANAGE_ORDERS,)
+        error_type_class = OrderError
+        error_type_field = "order_errors"
 
     @classmethod
     def clean_instance(cls, _info, instance):
         if instance.order.status != OrderStatus.DRAFT:
-            raise ValidationError({"id": "Cannot delete line for non-draft orders."})
+            raise ValidationError(
+                {
+                    "id": ValidationError(
+                        "Cannot delete line for non-draft orders.",
+                        code=OrderErrorCode.CANNOT_DELETE,
+                    )
+                }
+            )

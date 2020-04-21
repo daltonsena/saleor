@@ -4,13 +4,16 @@ import graphene
 import graphene_django_optimizer as gql_optimizer
 from graphene import relay
 
+from ....core.permissions import ProductPermissions
 from ....product import models
 from ...core.connection import CountableDjangoObjectType
-from ...translations.enums import LanguageCodeEnum
-from ...translations.resolvers import resolve_translation
+from ...decorators import permission_required
+from ...meta.deprecated.resolvers import resolve_meta, resolve_private_meta
+from ...meta.types import ObjectWithMetadata
+from ...translations.fields import TranslationField
 from ...translations.types import AttributeTranslation, AttributeValueTranslation
 from ..descriptions import AttributeDescriptions, AttributeValueDescriptions
-from ..enums import AttributeValueType
+from ..enums import AttributeInputTypeEnum, AttributeValueType
 
 COLOR_PATTERN = r"^(#[0-9a-fA-F]{3}|#(?:[0-9a-fA-F]{2}){2,4}|(rgb|hsl)a?\((-?\d+%?[,\s]+){2,3}\s*[\d\.]+%?\))$"  # noqa
 color_pattern = re.compile(COLOR_PATTERN)
@@ -30,23 +33,18 @@ class AttributeValue(CountableDjangoObjectType):
     name = graphene.String(description=AttributeValueDescriptions.NAME)
     slug = graphene.String(description=AttributeValueDescriptions.SLUG)
     type = AttributeValueType(description=AttributeValueDescriptions.TYPE)
-    value = graphene.String(description=AttributeValueDescriptions.VALUE)
-    translation = graphene.Field(
-        AttributeValueTranslation,
-        language_code=graphene.Argument(
-            LanguageCodeEnum,
-            description="A language code to return the translation for.",
-            required=True,
-        ),
-        description=(
-            "Returns translated Attribute Value fields " "for the given language code."
-        ),
-        resolver=resolve_translation,
+    translation = TranslationField(
+        AttributeValueTranslation, type_name="attribute value"
+    )
+
+    input_type = gql_optimizer.field(
+        AttributeInputTypeEnum(description=AttributeDescriptions.INPUT_TYPE),
+        model_field="attribute",
     )
 
     class Meta:
         description = "Represents a value of an attribute."
-        only_fields = ["id", "sort_order"]
+        only_fields = ["id"]
         interfaces = [relay.Node]
         model = models.AttributeValue
 
@@ -54,38 +52,96 @@ class AttributeValue(CountableDjangoObjectType):
     def resolve_type(root: models.AttributeValue, *_args):
         return resolve_attribute_value_type(root.value)
 
+    @staticmethod
+    @permission_required(ProductPermissions.MANAGE_PRODUCTS)
+    def resolve_input_type(root: models.AttributeValue, *_args):
+        return root.input_type
+
 
 class Attribute(CountableDjangoObjectType):
+    input_type = AttributeInputTypeEnum(description=AttributeDescriptions.INPUT_TYPE)
+
     name = graphene.String(description=AttributeDescriptions.NAME)
     slug = graphene.String(description=AttributeDescriptions.SLUG)
+
     values = gql_optimizer.field(
         graphene.List(AttributeValue, description=AttributeDescriptions.VALUES),
         model_field="values",
     )
-    translation = graphene.Field(
-        AttributeTranslation,
-        language_code=graphene.Argument(
-            LanguageCodeEnum,
-            description="A language code to return the translation for.",
-            required=True,
-        ),
-        description=(
-            "Returns translated Attribute fields " "for the given language code."
-        ),
-        resolver=resolve_translation,
+
+    value_required = graphene.Boolean(
+        description=AttributeDescriptions.VALUE_REQUIRED, required=True
+    )
+    visible_in_storefront = graphene.Boolean(
+        description=AttributeDescriptions.VISIBLE_IN_STOREFRONT, required=True
+    )
+    filterable_in_storefront = graphene.Boolean(
+        description=AttributeDescriptions.FILTERABLE_IN_STOREFRONT, required=True
+    )
+    filterable_in_dashboard = graphene.Boolean(
+        description=AttributeDescriptions.FILTERABLE_IN_DASHBOARD, required=True
+    )
+    available_in_grid = graphene.Boolean(
+        description=AttributeDescriptions.AVAILABLE_IN_GRID, required=True
+    )
+
+    translation = TranslationField(AttributeTranslation, type_name="attribute")
+
+    storefront_search_position = graphene.Int(
+        description=AttributeDescriptions.STOREFRONT_SEARCH_POSITION, required=True
     )
 
     class Meta:
-        description = """
-            Custom attribute of a product. Attributes can be
-            assigned to products and variants at the product type level."""
-        only_fields = ["id", "product_type", "product_variant_type"]
-        interfaces = [relay.Node]
+        description = (
+            "Custom attribute of a product. Attributes can be assigned to products and "
+            "variants at the product type level."
+        )
+        only_fields = ["id", "product_types", "product_variant_types"]
+        interfaces = [relay.Node, ObjectWithMetadata]
         model = models.Attribute
 
     @staticmethod
     def resolve_values(root: models.Attribute, *_args):
         return root.values.all()
+
+    @staticmethod
+    @permission_required(ProductPermissions.MANAGE_PRODUCTS)
+    def resolve_private_meta(root: models.Attribute, _info):
+        return resolve_private_meta(root, _info)
+
+    @staticmethod
+    def resolve_meta(root: models.Attribute, _info):
+        return resolve_meta(root, _info)
+
+    @staticmethod
+    @permission_required(ProductPermissions.MANAGE_PRODUCTS)
+    def resolve_value_required(root: models.Attribute, *_args):
+        return root.value_required
+
+    @staticmethod
+    @permission_required(ProductPermissions.MANAGE_PRODUCTS)
+    def resolve_visible_in_storefront(root: models.Attribute, *_args):
+        return root.visible_in_storefront
+
+    @staticmethod
+    @permission_required(ProductPermissions.MANAGE_PRODUCTS)
+    def resolve_filterable_in_storefront(root: models.Attribute, *_args):
+        return root.filterable_in_storefront
+
+    @staticmethod
+    @permission_required(ProductPermissions.MANAGE_PRODUCTS)
+    def resolve_filterable_in_dashboard(root: models.Attribute, *_args):
+        return root.filterable_in_dashboard
+
+    @staticmethod
+    @permission_required(ProductPermissions.MANAGE_PRODUCTS)
+    def resolve_storefront_search_position(root: models.Attribute, *_args):
+        return root.storefront_search_position
+
+    @staticmethod
+    @permission_required(ProductPermissions.MANAGE_PRODUCTS)
+    def resolve_available_in_grid(root: models.Attribute, *_args):
+        return root.available_in_grid
 
 
 class SelectedAttribute(graphene.ObjectType):
@@ -95,11 +151,8 @@ class SelectedAttribute(graphene.ObjectType):
         description=AttributeDescriptions.NAME,
         required=True,
     )
-    value = graphene.Field(
-        AttributeValue,
-        default_value=None,
-        description="Value of an attribute.",
-        required=True,
+    values = graphene.List(
+        AttributeValue, description="Values of an attribute.", required=True
     )
 
     class Meta:
@@ -108,4 +161,13 @@ class SelectedAttribute(graphene.ObjectType):
 
 class AttributeInput(graphene.InputObjectType):
     slug = graphene.String(required=True, description=AttributeDescriptions.SLUG)
-    value = graphene.String(required=True, description=AttributeValueDescriptions.SLUG)
+    value = graphene.String(
+        required=False,
+        description=(
+            "[Deprecated] Internal representation of a value (unique per attribute). "
+            "This field will be removed after 2020-07-31."
+        ),
+    )  # deprecated
+    values = graphene.List(
+        graphene.String, required=False, description=AttributeValueDescriptions.SLUG
+    )

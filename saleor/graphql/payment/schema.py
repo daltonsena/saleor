@@ -1,34 +1,34 @@
 import graphene
-from graphql_jwt.decorators import permission_required
 
+from ...core.permissions import OrderPermissions
 from ..core.fields import PrefetchingConnectionField
-from .enums import PaymentGatewayEnum
-from .mutations import PaymentCapture, PaymentRefund, PaymentVoid
-from .resolvers import resolve_payment_client_token, resolve_payments
+from ..decorators import permission_required
+from .mutations import PaymentCapture, PaymentRefund, PaymentSecureConfirm, PaymentVoid
+from .resolvers import resolve_payments
 from .types import Payment
 
 
 class PaymentQueries(graphene.ObjectType):
-    payment = graphene.Field(Payment, id=graphene.Argument(graphene.ID))
-    payments = PrefetchingConnectionField(Payment, description="List of payments")
-    payment_client_token = graphene.Field(
-        graphene.String, args={"gateway": PaymentGatewayEnum()}
+    payment = graphene.Field(
+        Payment,
+        description="Look up a payment by ID.",
+        id=graphene.Argument(
+            graphene.ID, description="ID of the payment.", required=True
+        ),
     )
+    payments = PrefetchingConnectionField(Payment, description="List of payments.")
 
-    @permission_required("order.manage_orders")
+    @permission_required(OrderPermissions.MANAGE_ORDERS)
     def resolve_payment(self, info, **data):
         return graphene.Node.get_node_from_global_id(info, data.get("id"), Payment)
 
-    @permission_required("order.manage_orders")
+    @permission_required(OrderPermissions.MANAGE_ORDERS)
     def resolve_payments(self, info, query=None, **_kwargs):
         return resolve_payments(info, query)
-
-    def resolve_payment_client_token(self, info, gateway=None):
-        user = info.context.user if info.context.user.is_authenticated else None
-        return resolve_payment_client_token(gateway, user=user)
 
 
 class PaymentMutations(graphene.ObjectType):
     payment_capture = PaymentCapture.Field()
     payment_refund = PaymentRefund.Field()
     payment_void = PaymentVoid.Field()
+    payment_secure_confirm = PaymentSecureConfirm.Field()

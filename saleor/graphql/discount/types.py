@@ -3,12 +3,11 @@ import graphene_django_optimizer as gql_optimizer
 from graphene import relay
 
 from ...discount import models
+from ..core import types
 from ..core.connection import CountableDjangoObjectType
 from ..core.fields import PrefetchingConnectionField
-from ..core.types import CountryDisplay
 from ..product.types import Category, Collection, Product
-from ..translations.enums import LanguageCodeEnum
-from ..translations.resolvers import resolve_translation
+from ..translations.fields import TranslationField
 from ..translations.types import SaleTranslation, VoucherTranslation
 from .enums import DiscountValueTypeEnum, VoucherTypeEnum
 
@@ -32,21 +31,13 @@ class Sale(CountableDjangoObjectType):
         ),
         model_field="products",
     )
-    translation = graphene.Field(
-        SaleTranslation,
-        language_code=graphene.Argument(
-            LanguageCodeEnum,
-            description="A language code to return the translation for.",
-            required=True,
-        ),
-        description="Returns translated sale fields for the given language code.",
-        resolver=resolve_translation,
-    )
+    translation = TranslationField(SaleTranslation, type_name="sale")
 
     class Meta:
-        description = """
-        Sales allow creating discounts for categories, collections or
-        products and are visible to all the customers."""
+        description = (
+            "Sales allow creating discounts for categories, collections or products "
+            "and are visible to all the customers."
+        )
         interfaces = [relay.Node]
         model = models.Sale
         only_fields = ["end_date", "id", "name", "start_date", "type", "value"]
@@ -84,30 +75,22 @@ class Voucher(CountableDjangoObjectType):
         model_field="products",
     )
     countries = graphene.List(
-        CountryDisplay,
+        types.CountryDisplay,
         description="List of countries available for the shipping voucher.",
     )
-    translation = graphene.Field(
-        VoucherTranslation,
-        language_code=graphene.Argument(
-            LanguageCodeEnum,
-            description="A language code to return the translation for.",
-            required=True,
-        ),
-        description="Returns translated Voucher fields for the given language code.",
-        resolver=resolve_translation,
-    )
+    translation = TranslationField(VoucherTranslation, type_name="voucher")
     discount_value_type = DiscountValueTypeEnum(
         description="Determines a type of discount for voucher - value or percentage",
         required=True,
     )
-    type = VoucherTypeEnum(description="Determines a type of voucher", required=True)
+    type = VoucherTypeEnum(description="Determines a type of voucher.", required=True)
 
     class Meta:
-        description = """
-        Vouchers allow giving discounts to particular customers on categories,
-        collections or specific products. They can be used during checkout by
-        providing valid voucher codes."""
+        description = (
+            "Vouchers allow giving discounts to particular customers on categories, "
+            "collections or specific products. They can be used during checkout by "
+            "providing valid voucher codes."
+        )
         only_fields = [
             "apply_once_per_order",
             "apply_once_per_customer",
@@ -116,7 +99,7 @@ class Voucher(CountableDjangoObjectType):
             "discount_value_type",
             "end_date",
             "id",
-            "min_amount_spent",
+            "min_spent",
             "min_checkout_items_quantity",
             "name",
             "start_date",
@@ -142,6 +125,6 @@ class Voucher(CountableDjangoObjectType):
     @staticmethod
     def resolve_countries(root: models.Voucher, *_args, **_kwargs):
         return [
-            CountryDisplay(code=country.code, country=country.name)
+            types.CountryDisplay(code=country.code, country=country.name)
             for country in root.countries
         ]

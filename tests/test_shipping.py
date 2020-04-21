@@ -2,8 +2,8 @@ import pytest
 from measurement.measures import Weight
 from prices import Money
 
-from saleor.core.utils import format_money
 from saleor.shipping.models import ShippingMethod, ShippingMethodType, ShippingZone
+from saleor.shipping.utils import default_shipping_zone_exists
 
 from .utils import money
 
@@ -15,38 +15,29 @@ def test_shipping_get_total(monkeypatch, shipping_zone):
     assert method.get_total() == price
 
 
-def test_shipping_get_ajax_label(shipping_zone):
-    shipping_method = shipping_zone.shipping_methods.get()
-    label = shipping_method.get_ajax_label()
-    proper_label = "%(shipping_method)s %(price)s" % {
-        "shipping_method": shipping_method,
-        "price": format_money(shipping_method.price),
-    }
-    assert label == proper_label
-
-
 @pytest.mark.parametrize(
     "price, min_price, max_price, shipping_included",
     (
-        (money(10), money(10), money(20), True),  # price equal min price
-        (money(10), money(1), money(10), True),  # price equal max price
-        (money(9), money(10), money(15), False),  # price just below min price
-        (money(10), money(1), money(9), False),  # price just above max price
-        (money(10000000), money(1), None, True),  # no max price limit
-        (money(10), money(5), money(15), True),
+        (10, 10, 20, True),  # price equal min price
+        (10, 1, 10, True),  # price equal max price
+        (9, 10, 15, False),  # price just below min price
+        (10, 1, 9, False),  # price just above max price
+        (10000000, 1, None, True),  # no max price limit
+        (10, 5, 15, True),
     ),
 )  # regular case
 def test_applicable_shipping_methods_price(
     shipping_zone, price, min_price, max_price, shipping_included
 ):
     method = shipping_zone.shipping_methods.create(
-        minimum_order_price=min_price,
-        maximum_order_price=max_price,
+        minimum_order_price_amount=min_price,
+        maximum_order_price_amount=max_price,
+        currency="USD",
         type=ShippingMethodType.PRICE_BASED,
     )
     assert "PL" in shipping_zone.countries
     result = ShippingMethod.objects.applicable_shipping_methods(
-        price=price, weight=Weight(kg=0), country_code="PL"
+        price=Money(price, "USD"), weight=Weight(kg=0), country_code="PL"
     )
     assert (method in result) == shipping_included
 
@@ -148,16 +139,8 @@ def test_use_default_shipping_zone(shipping_zone):
     assert result[0] == weight_method
 
 
-@pytest.mark.parametrize(
-    "countries, result",
-    (
-        (["PL"], "Poland"),
-        (["PL", "DE", "IT"], "Poland, Germany, Italy"),
-        (["PL", "DE", "IT", "LE"], "4 countries"),
-        ([], "0 countries"),
-    ),
-)
-def test_countries_display(shipping_zone, countries, result):
-    shipping_zone.countries = countries
+def test_default_shipping_zone_exists(shipping_zone):
+    shipping_zone.default = True
     shipping_zone.save()
-    assert shipping_zone.countries_display() == result
+    assert default_shipping_zone_exists()
+    assert not default_shipping_zone_exists(shipping_zone.pk)

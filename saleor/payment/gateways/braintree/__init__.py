@@ -1,9 +1,7 @@
-import logging
-from typing import Dict, List
+from typing import Dict, List, Optional
 
 import braintree as braintree_sdk
 from django.core.exceptions import ImproperlyConfigured
-from django.utils.translation import pgettext_lazy
 
 from ... import TransactionKind
 from ...interface import (
@@ -15,17 +13,6 @@ from ...interface import (
     TokenConfig,
 )
 from .errors import DEFAULT_ERROR_MESSAGE, BraintreeException
-from .forms import BraintreePaymentForm
-
-logger = logging.getLogger(__name__)
-
-
-# FIXME: Move to SiteSettings
-
-# If this option is checked, then one needs to authorize the amount paid
-# manually via the Braintree Dashboard
-CONFIRM_MANUALLY = False
-THREE_D_SECURE_REQUIRED = False
 
 # Error codes whitelist should be a dict of code: error_msg_override
 # if no error_msg_override is provided,
@@ -38,36 +25,39 @@ ERROR_CODES_WHITELIST = {
 }
 
 
+def get_billing_data(payment_information: PaymentData) -> Dict:
+    billing: Dict[str, str] = {}
+    if payment_information.billing:
+        billing_info = payment_information.billing
+        billing = {
+            "first_name": billing_info.first_name,
+            "last_name": billing_info.last_name,
+            "company": billing_info.company_name,
+            "postal_code": billing_info.postal_code,
+            "street_address": billing_info.street_address_1,
+            "extended_address": billing_info.street_address_2,
+            "locality": billing_info.city,
+            "region": billing_info.country_area,
+            "country_code_alpha2": billing_info.country,
+        }
+    return billing
+
+
 def get_customer_data(payment_information: PaymentData) -> Dict:
-    """Provides customer info, use only for new customer creation"""
-    billing = payment_information.billing
+    """Provide customer info, use only for new customer creation."""
     return {
         "order_id": payment_information.order_id,
-        "billing": {
-            "first_name": billing.first_name,
-            "last_name": billing.last_name,
-            "company": billing.company_name,
-            "postal_code": billing.postal_code,
-            "street_address": billing.street_address_1,
-            "extended_address": billing.street_address_2,
-            "locality": billing.city,
-            "region": billing.country_area,
-            "country_code_alpha2": billing.country,
-        },
+        "billing": get_billing_data(payment_information),
         "risk_data": {"customer_ip": payment_information.customer_ip_address or ""},
         "customer": {"email": payment_information.customer_email},
     }
 
 
 def get_error_for_client(errors: List) -> str:
-    """Filters all error messages and decides which one is visible for the
-    client side.
-    """
+    """Filter all error messages and decides which one is visible for the client."""
     if not errors:
         return ""
-    default_msg = pgettext_lazy(
-        "payment error", "Unable to process transaction. Please try again in a moment"
-    )
+    default_msg = "Unable to process transaction. Please try again in a moment"
     for error in errors:
         if error["code"] in ERROR_CODES_WHITELIST:
             return ERROR_CODES_WHITELIST[error["code"]] or error["message"]
@@ -76,7 +66,7 @@ def get_error_for_client(errors: List) -> str:
 
 def extract_gateway_response(braintree_result) -> Dict:
     """Extract data from Braintree response that will be stored locally."""
-    errors = []
+    errors: List[Optional[Dict[str, str]]] = []
     if not braintree_result.is_success:
         errors = [
             {"code": error.code, "message": error.message}
@@ -96,10 +86,6 @@ def extract_gateway_response(braintree_result) -> Dict:
     }
 
 
-def create_form(data, payment_information, connection_params):
-    return BraintreePaymentForm(data=data, payment_information=payment_information)
-
-
 def get_braintree_gateway(sandbox_mode, merchant_id, public_key, private_key):
     if not all([merchant_id, private_key, public_key]):
         raise ImproperlyConfigured("Incorrectly configured Braintree gateway.")
@@ -117,7 +103,9 @@ def get_braintree_gateway(sandbox_mode, merchant_id, public_key, private_key):
     return gateway
 
 
-def get_client_token(config: GatewayConfig, token_config: TokenConfig = None) -> str:
+def get_client_token(
+    config: GatewayConfig, token_config: Optional[TokenConfig] = None
+) -> str:
     gateway = get_braintree_gateway(**config.connection_params)
     if not token_config:
         return gateway.client_token.generate()
@@ -149,6 +137,7 @@ def authorize(
     kind = TransactionKind.CAPTURE if config.auto_capture else TransactionKind.AUTH
     return GatewayResponse(
         is_success=result.is_success,
+        action_required=False,
         kind=kind,
         amount=gateway_response.get("amount", payment_information.amount),
         currency=gateway_response.get("currency", payment_information.currency),
@@ -172,7 +161,7 @@ def transaction_for_new_customer(
             "options": {
                 "submit_for_settlement": config.auto_capture,
                 "store_in_vault_on_success": payment_information.reuse_source,
-                "three_d_secure": {"required": THREE_D_SECURE_REQUIRED},
+                "three_d_secure": {"required": config.require_3d_secure},
             },
             **get_customer_data(payment_information),
         }
@@ -209,6 +198,7 @@ def capture(payment_information: PaymentData, config: GatewayConfig) -> GatewayR
 
     return GatewayResponse(
         is_success=result.is_success,
+        action_required=False,
         kind=TransactionKind.CAPTURE,
         amount=gateway_response.get("amount", payment_information.amount),
         currency=gateway_response.get("currency", payment_information.currency),
@@ -233,6 +223,7 @@ def void(payment_information: PaymentData, config: GatewayConfig) -> GatewayResp
 
     return GatewayResponse(
         is_success=result.is_success,
+        action_required=False,
         kind=TransactionKind.VOID,
         amount=gateway_response.get("amount", payment_information.amount),
         currency=gateway_response.get("currency", payment_information.currency),
@@ -260,6 +251,7 @@ def refund(payment_information: PaymentData, config: GatewayConfig) -> GatewayRe
 
     return GatewayResponse(
         is_success=result.is_success,
+        action_required=False,
         kind=TransactionKind.REFUND,
         amount=gateway_response.get("amount", payment_information.amount),
         currency=gateway_response.get("currency", payment_information.currency),

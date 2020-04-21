@@ -11,13 +11,7 @@ from prices import Money
 from ..checkout.models import Checkout
 from ..core.taxes import zero_money
 from ..order.models import Order
-from . import (
-    ChargeStatus,
-    CustomPaymentChoices,
-    TransactionError,
-    TransactionKind,
-    get_payment_gateway,
-)
+from . import ChargeStatus, CustomPaymentChoices, TransactionError, TransactionKind
 
 
 class Payment(models.Model):
@@ -37,6 +31,7 @@ class Payment(models.Model):
 
     gateway = models.CharField(max_length=255)
     is_active = models.BooleanField(default=True)
+    to_confirm = models.BooleanField(default=False)
     created = models.DateTimeField(auto_now_add=True)
     modified = models.DateTimeField(auto_now=True)
     charge_status = models.CharField(
@@ -53,7 +48,9 @@ class Payment(models.Model):
         decimal_places=settings.DEFAULT_DECIMAL_PLACES,
         default=Decimal("0.0"),
     )
-    currency = models.CharField(max_length=10)  # FIXME: add ISO4217 validator
+    currency = models.CharField(
+        max_length=settings.DEFAULT_CURRENCY_CODE_LENGTH
+    )  # FIXME: add ISO4217 validator
 
     checkout = models.ForeignKey(
         Checkout, null=True, related_name="payments", on_delete=models.SET_NULL
@@ -162,11 +159,6 @@ class Payment(models.Model):
     def can_capture(self):
         if not (self.is_active and self.not_charged):
             return False
-
-        _, gateway_config = get_payment_gateway(self.gateway)
-        if gateway_config.auto_capture:
-            return self.is_authorized
-
         return True
 
     def can_void(self):
@@ -184,6 +176,9 @@ class Payment(models.Model):
             and self.gateway != CustomPaymentChoices.MANUAL
         )
 
+    def can_confirm(self):
+        return self.is_active and self.not_charged
+
 
 class Transaction(models.Model):
     """Represents a single payment operation.
@@ -199,7 +194,8 @@ class Transaction(models.Model):
     token = models.CharField(max_length=128, blank=True, default="")
     kind = models.CharField(max_length=10, choices=TransactionKind.CHOICES)
     is_success = models.BooleanField(default=False)
-    currency = models.CharField(max_length=10)
+    action_required = models.BooleanField(default=False)
+    currency = models.CharField(max_length=settings.DEFAULT_CURRENCY_CODE_LENGTH)
     amount = models.DecimalField(
         max_digits=settings.DEFAULT_MAX_DIGITS,
         decimal_places=settings.DEFAULT_DECIMAL_PLACES,

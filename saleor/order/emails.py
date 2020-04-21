@@ -1,37 +1,50 @@
-from django.conf import settings
-from django.urls import reverse
+from urllib.parse import urlencode
+
 from templated_email import send_templated_mail
 
+from ..account.models import StaffNotificationRecipient
 from ..celeryconf import app
-from ..core.emails import get_email_base_context
-from ..core.utils import build_absolute_uri
+from ..core.emails import get_email_context, prepare_url
 from ..seo.schema.email import get_order_confirmation_markup
 from . import events
 from .models import Fulfillment, Order
 
 CONFIRM_ORDER_TEMPLATE = "order/confirm_order"
+STAFF_CONFIRM_ORDER_TEMPLATE = "order/staff_confirm_order"
 CONFIRM_FULFILLMENT_TEMPLATE = "order/confirm_fulfillment"
 UPDATE_FULFILLMENT_TEMPLATE = "order/update_fulfillment"
 CONFIRM_PAYMENT_TEMPLATE = "order/payment/confirm_payment"
 
 
-def collect_data_for_email(order_pk, template):
-    """Collects data required for email sending.
+def collect_staff_order_notification_data(
+    order_pk: int, template: str, redirect_url: str
+) -> dict:
+    data = collect_data_for_email(order_pk, template, redirect_url)
+    staff_notifications = StaffNotificationRecipient.objects.filter(
+        active=True, user__is_active=True, user__is_staff=True
+    )
+    recipient_emails = [
+        notification.get_email() for notification in staff_notifications
+    ]
+    data["recipient_list"] = recipient_emails
+    return data
 
-    Args:
-        order_pk (int): order primary key
-        template (str): email template path
-    """
+
+def collect_data_for_email(
+    order_pk: int, template: str, redirect_url: str = ""
+) -> dict:
+    """Collect the required data for sending emails."""
     order = Order.objects.get(pk=order_pk)
     recipient_email = order.get_customer_email()
-    email_context = get_email_base_context()
-    email_context["order_details_url"] = build_absolute_uri(
-        reverse("order:details", kwargs={"token": order.token})
+    send_kwargs, email_context = get_email_context()
+
+    email_context["order_details_url"] = (
+        prepare_order_details_url(order, redirect_url) if redirect_url else ""
     )
     email_context["order"] = order
 
     # Order confirmation template requires additional information
-    if template == CONFIRM_ORDER_TEMPLATE:
+    if template in [CONFIRM_ORDER_TEMPLATE, STAFF_CONFIRM_ORDER_TEMPLATE]:
         email_markup = get_order_confirmation_markup(order)
         email_context["schema_markup"] = email_markup
 
@@ -39,8 +52,13 @@ def collect_data_for_email(order_pk, template):
         "recipient_list": [recipient_email],
         "template_name": template,
         "context": email_context,
-        "from_email": settings.ORDER_FROM_EMAIL,
+        **send_kwargs,
     }
+
+
+def prepare_order_details_url(order: Order, redirect_url: str) -> str:
+    params = urlencode({"token": order.token})
+    return prepare_url(params, redirect_url)
 
 
 def collect_data_for_fullfillment_email(order_pk, template, fulfillment_pk):
@@ -61,9 +79,9 @@ def collect_data_for_fullfillment_email(order_pk, template, fulfillment_pk):
 
 
 @app.task
-def send_order_confirmation(order_pk, user_pk=None):
-    """Sends order confirmation email."""
-    email_data = collect_data_for_email(order_pk, CONFIRM_ORDER_TEMPLATE)
+def send_order_confirmation(order_pk, redirect_url, user_pk=None):
+    """Send order confirmation email."""
+    email_data = collect_data_for_email(order_pk, CONFIRM_ORDER_TEMPLATE, redirect_url)
     send_templated_mail(**email_data)
     events.email_sent_event(
         order=email_data["context"]["order"],
@@ -71,6 +89,16 @@ def send_order_confirmation(order_pk, user_pk=None):
         user_pk=user_pk,
         email_type=events.OrderEventsEmails.ORDER,
     )
+
+
+@app.task
+def send_staff_order_confirmation(order_pk, redirect_url):
+    """Send order confirmation email."""
+    staff_email_data = collect_staff_order_notification_data(
+        order_pk, STAFF_CONFIRM_ORDER_TEMPLATE, redirect_url
+    )
+    if staff_email_data["recipient_list"]:
+        send_templated_mail(**staff_email_data)
 
 
 @app.task
@@ -106,6 +134,6 @@ def send_fulfillment_update(order_pk, fulfillment_pk):
 
 @app.task
 def send_payment_confirmation(order_pk):
-    """Sends payment confirmation email."""
+    """Send the payment confirmation email."""
     email_data = collect_data_for_email(order_pk, CONFIRM_PAYMENT_TEMPLATE)
     send_templated_mail(**email_data)

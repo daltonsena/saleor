@@ -1,10 +1,10 @@
 import graphene
-from graphql_jwt.decorators import login_required, permission_required
 
+from ...core.permissions import OrderPermissions
 from ..core.enums import ReportingPeriod
 from ..core.fields import FilterInputConnectionField, PrefetchingConnectionField
 from ..core.types import FilterInputObjectType, TaxedMoney
-from ..descriptions import DESCRIPTIONS
+from ..decorators import permission_required
 from .bulk_mutations.draft_orders import DraftOrderBulkDelete, DraftOrderLinesBulkDelete
 from .bulk_mutations.orders import OrderBulkCancel
 from .enums import OrderStatusFilter
@@ -20,16 +20,24 @@ from .mutations.draft_orders import (
 )
 from .mutations.fulfillments import (
     FulfillmentCancel,
+    FulfillmentClearMeta,
+    FulfillmentClearPrivateMeta,
     FulfillmentCreate,
+    FulfillmentUpdateMeta,
+    FulfillmentUpdatePrivateMeta,
     FulfillmentUpdateTracking,
 )
 from .mutations.orders import (
     OrderAddNote,
     OrderCancel,
     OrderCapture,
+    OrderClearMeta,
+    OrderClearPrivateMeta,
     OrderMarkAsPaid,
     OrderRefund,
     OrderUpdate,
+    OrderUpdateMeta,
+    OrderUpdatePrivateMeta,
     OrderUpdateShipping,
     OrderVoid,
 )
@@ -41,6 +49,7 @@ from .resolvers import (
     resolve_orders,
     resolve_orders_total,
 )
+from .sorters import OrderSortingInput
 from .types import Order, OrderEvent
 
 
@@ -57,65 +66,83 @@ class OrderDraftFilterInput(FilterInputObjectType):
 class OrderQueries(graphene.ObjectType):
     homepage_events = PrefetchingConnectionField(
         OrderEvent,
-        description="""List of activity events to display on
-        homepage (at the moment it only contains order-events).""",
+        description=(
+            "List of activity events to display on "
+            "homepage (at the moment it only contains order-events)."
+        ),
     )
     order = graphene.Field(
         Order,
-        description="Lookup an order by ID.",
-        id=graphene.Argument(graphene.ID, required=True),
+        description="Look up an order by ID.",
+        id=graphene.Argument(graphene.ID, description="ID of an order.", required=True),
     )
     orders = FilterInputConnectionField(
         Order,
-        filter=OrderFilterInput(),
-        query=graphene.String(description=DESCRIPTIONS["order"]),
+        sort_by=OrderSortingInput(description="Sort orders."),
+        filter=OrderFilterInput(description="Filtering options for orders."),
         created=graphene.Argument(
-            ReportingPeriod, description="Filter orders from a selected timespan."
+            ReportingPeriod,
+            description=(
+                "[Deprecated] Filter orders from a selected timespan. Use the `filter` "
+                "field instead. This field will be removed after 2020-07-31."
+            ),
         ),
         status=graphene.Argument(
-            OrderStatusFilter, description="Filter order by status"
+            OrderStatusFilter,
+            description=(
+                "[Deprecated] Filter order by status. Use the `filter` field instead. "
+                "This field will be removed after 2020-07-31."
+            ),
         ),
-        description="List of the shop's orders.",
+        description="List of orders.",
     )
     draft_orders = FilterInputConnectionField(
         Order,
-        filter=OrderDraftFilterInput(),
-        query=graphene.String(description=DESCRIPTIONS["order"]),
+        sort_by=OrderSortingInput(description="Sort draft orders."),
+        filter=OrderDraftFilterInput(description="Filtering options for draft orders."),
         created=graphene.Argument(
-            ReportingPeriod, description="Filter draft orders from a selected timespan."
+            ReportingPeriod,
+            description=(
+                "[Deprecated] Filter draft orders from a selected timespan. Use the "
+                "`filter` field instead. This field will be removed after 2020-07-31."
+            ),
         ),
-        description="List of the shop's draft orders.",
+        description="List of draft orders.",
     )
     orders_total = graphene.Field(
         TaxedMoney,
-        description="Total sales.",
-        period=graphene.Argument(
-            ReportingPeriod, description="Get total sales for selected span of time."
-        ),
+        description="Return the total sales amount from a specific period.",
+        period=graphene.Argument(ReportingPeriod, description="A period of time."),
     )
     order_by_token = graphene.Field(
         Order,
-        description="Lookup an order by token.",
-        token=graphene.Argument(graphene.String, required=True),
+        description="Look up an order by token.",
+        token=graphene.Argument(
+            graphene.UUID, description="The order's token.", required=True
+        ),
     )
 
-    @permission_required("order.manage_orders")
+    @permission_required(OrderPermissions.MANAGE_ORDERS)
     def resolve_homepage_events(self, *_args, **_kwargs):
         return resolve_homepage_events()
 
-    @login_required
+    @permission_required(OrderPermissions.MANAGE_ORDERS)
     def resolve_order(self, info, **data):
         return resolve_order(info, data.get("id"))
 
-    @permission_required("order.manage_orders")
-    def resolve_orders(self, info, created=None, status=None, query=None, **_kwargs):
-        return resolve_orders(info, created, status, query)
+    @permission_required(OrderPermissions.MANAGE_ORDERS)
+    def resolve_orders(
+        self, info, created=None, status=None, query=None, sort_by=None, **_kwargs
+    ):
+        return resolve_orders(info, created, status, query, sort_by)
 
-    @permission_required("order.manage_orders")
-    def resolve_draft_orders(self, info, created=None, query=None, **_kwargs):
-        return resolve_draft_orders(info, created, query)
+    @permission_required(OrderPermissions.MANAGE_ORDERS)
+    def resolve_draft_orders(
+        self, info, created=None, query=None, sort_by=None, **_kwargs
+    ):
+        return resolve_draft_orders(info, created, query, sort_by)
 
-    @permission_required("order.manage_orders")
+    @permission_required(OrderPermissions.MANAGE_ORDERS)
     def resolve_orders_total(self, info, period, **_kwargs):
         return resolve_orders_total(info, period)
 
@@ -137,12 +164,60 @@ class OrderMutations(graphene.ObjectType):
     order_add_note = OrderAddNote.Field()
     order_cancel = OrderCancel.Field()
     order_capture = OrderCapture.Field()
+    order_clear_private_meta = OrderClearPrivateMeta.Field(
+        deprecation_reason=(
+            "Use the `deletePrivateMetadata` mutation instead. This field will be "
+            "removed after 2020-07-31."
+        )
+    )
+    order_clear_meta = OrderClearMeta.Field(
+        deprecation_reason=(
+            "Use the `deleteMetadata` mutation instead. This field will be removed "
+            "after 2020-07-31."
+        )
+    )
     order_fulfillment_cancel = FulfillmentCancel.Field()
     order_fulfillment_create = FulfillmentCreate.Field()
     order_fulfillment_update_tracking = FulfillmentUpdateTracking.Field()
+    order_fulfillment_clear_meta = FulfillmentClearMeta.Field(
+        deprecation_reason=(
+            "Use the `deleteMetadata` mutation instead. This field will be removed "
+            "after 2020-07-31."
+        )
+    )
+    order_fulfillment_clear_private_meta = FulfillmentClearPrivateMeta.Field(
+        deprecation_reason=(
+            "Use the `deletePrivateMetadata` mutation instead. This field will be "
+            "removed after 2020-07-31."
+        )
+    )
+    order_fulfillment_update_meta = FulfillmentUpdateMeta.Field(
+        deprecation_reason=(
+            "Use the `updateMetadata` mutation instead. This field will be removed "
+            "after 2020-07-31."
+        )
+    )
+    order_fulfillment_update_private_meta = FulfillmentUpdatePrivateMeta.Field(
+        deprecation_reason=(
+            "Use the `updatePrivateMetadata` mutation instead. This field will be "
+            "removed after 2020-07-31."
+        )
+    )
     order_mark_as_paid = OrderMarkAsPaid.Field()
     order_refund = OrderRefund.Field()
     order_update = OrderUpdate.Field()
+    order_update_meta = OrderUpdateMeta.Field(
+        deprecation_reason=(
+            "Use the `updateMetadata` mutation instead. This field will be removed "
+            "after 2020-07-31."
+        )
+    )
+    order_update_private_meta = OrderUpdatePrivateMeta.Field(
+        deprecation_reason=(
+            "Use the `updatePrivateMetadata` mutation instead. This field will be "
+            "removed after 2020-07-31."
+        )
+    )
     order_update_shipping = OrderUpdateShipping.Field()
     order_void = OrderVoid.Field()
 

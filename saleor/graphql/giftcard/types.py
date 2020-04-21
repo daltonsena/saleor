@@ -1,13 +1,14 @@
 import graphene
-from graphql_jwt.decorators import permission_required
+from graphql_jwt.exceptions import PermissionDenied
 
+from ...core.permissions import AccountPermissions, GiftcardPermissions
 from ...giftcard import models
 from ..core.connection import CountableDjangoObjectType
 
 
 class GiftCard(CountableDjangoObjectType):
     display_code = graphene.String(
-        description="Code in format with allows displaying in a user interface."
+        description="Code in format which allows displaying in a user interface."
     )
     code = graphene.String(description="Gift card code.")
     user = graphene.Field(
@@ -16,10 +17,10 @@ class GiftCard(CountableDjangoObjectType):
     )
 
     class Meta:
-        description = """
-        A gift card is a prepaid electronic payment card accepted in stores.
-        They can be used during checkout by providing a valid gift
-        card codes. """
+        description = (
+            "A gift card is a prepaid electronic payment card accepted in stores. They "
+            "can be used during checkout by providing a valid gift card codes."
+        )
         only_fields = [
             "user",
             "code",
@@ -39,17 +40,19 @@ class GiftCard(CountableDjangoObjectType):
         return root.display_code
 
     @staticmethod
-    @permission_required("giftcard.manage_gift_card")
-    def resolve_user(root: models.GiftCard, *_args, **_kwargs):
-        return root.user
+    def resolve_user(root: models.GiftCard, info):
+        user = info.context.user
+        if user == root.user or user.has_perm(AccountPermissions.MANAGE_USERS):
+            return root.user
+        raise PermissionDenied()
 
     @staticmethod
     def resolve_code(root: models.GiftCard, info, **_kwargs):
-        viewer = info.context.user
+        user = info.context.user
         # Staff user has access to show gift card code only for gift card without user.
-        if viewer.has_perm("giftcard.manage_gift_card") and not root.user:
+        if user.has_perm(GiftcardPermissions.MANAGE_GIFT_CARD) and not root.user:
             return root.code
         # Only user associated with a gift card can see gift card code.
-        if viewer == root.user:
+        if user == root.user:
             return root.code
         return None

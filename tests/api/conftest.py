@@ -8,8 +8,9 @@ from django.shortcuts import reverse
 from django.test.client import MULTIPART_CONTENT, Client
 from graphql_jwt.shortcuts import get_token
 
-from saleor.account.models import User
+from saleor.account.models import ServiceAccount, User
 
+from ..utils import flush_post_commit_hooks
 from .utils import assert_no_permission
 
 API_PATH = reverse("api")
@@ -19,17 +20,37 @@ class ApiClient(Client):
     """GraphQL API client."""
 
     def __init__(self, *args, **kwargs):
-        user = kwargs.pop("user")
+        user = kwargs.pop("user", AnonymousUser())
+        service_account = kwargs.pop("service_account", None)
+        self._user = None
+        self.token = None
         self.user = user
+        self.service_token = None
+        self.service_account = service_account
         if not user.is_anonymous:
             self.token = get_token(user)
+        elif service_account:
+            token = service_account.tokens.first()
+            self.service_token = token.auth_token if token else None
         super().__init__(*args, **kwargs)
 
     def _base_environ(self, **request):
         environ = super()._base_environ(**request)
         if not self.user.is_anonymous:
-            environ.update({"HTTP_AUTHORIZATION": "JWT %s" % self.token})
+            environ["HTTP_AUTHORIZATION"] = f"JWT {self.token}"
+        elif self.service_token:
+            environ["HTTP_AUTHORIZATION"] = f"Bearer {self.service_token}"
         return environ
+
+    @property
+    def user(self):
+        return self._user
+
+    @user.setter
+    def user(self, user):
+        self._user = user
+        if not user.is_anonymous:
+            self.token = get_token(user)
 
     def post(self, data=None, **kwargs):
         """Send a POST request.
@@ -67,8 +88,13 @@ class ApiClient(Client):
             if check_no_permissions:
                 response = super().post(API_PATH, data, **kwargs)
                 assert_no_permission(response)
-            self.user.user_permissions.add(*permissions)
-        return super().post(API_PATH, data, **kwargs)
+            if self.service_account:
+                self.service_account.permissions.add(*permissions)
+            else:
+                self.user.user_permissions.add(*permissions)
+        result = super().post(API_PATH, data, **kwargs)
+        flush_post_commit_hooks()
+        return result
 
     def post_multipart(self, *args, permissions=None, **kwargs):
         """Send a multipart POST request.
@@ -83,6 +109,11 @@ class ApiClient(Client):
             assert_no_permission(response)
             self.user.user_permissions.add(*permissions)
         return super().post(API_PATH, *args, **kwargs)
+
+
+@pytest.fixture
+def service_account_api_client(service_account):
+    return ApiClient(service_account=service_account)
 
 
 @pytest.fixture
@@ -130,3 +161,12 @@ def user_list_not_active(user_list):
     users = User.objects.filter(pk__in=[user.pk for user in user_list])
     users.update(is_active=False)
     return users
+
+
+@pytest.fixture
+def service_account(db):
+    service_account = ServiceAccount.objects.create(
+        name="Sample service account", is_active=True
+    )
+    service_account.tokens.create(name="Default")
+    return service_account

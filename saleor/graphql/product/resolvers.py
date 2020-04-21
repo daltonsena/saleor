@@ -1,85 +1,133 @@
-import graphene
+from typing import TYPE_CHECKING
+
 import graphene_django_optimizer as gql_optimizer
-from django.db.models import Q, Sum
+from django.db.models import Sum
+from graphql import GraphQLError
+from graphql_relay import from_global_id
 
 from ...order import OrderStatus
 from ...product import models
 from ...search.backends import picker
-from ..utils import filter_by_period, filter_by_query_param, get_database_id, get_nodes
+from ..core.enums import OrderDirection
+from ..utils import (
+    filter_by_period,
+    filter_by_query_param,
+    get_database_id,
+    get_nodes,
+    get_user_or_service_account_from_context,
+    sort_queryset,
+)
 from .filters import (
+    filter_attributes_by_product_types,
     filter_products_by_attributes,
     filter_products_by_categories,
     filter_products_by_collections,
+    filter_products_by_minimal_price,
     filter_products_by_price,
     filter_products_by_stock_availability,
-    sort_qs,
 )
-from .types import Category, Collection, ProductVariant
+from .sorters import (
+    AttributeSortField,
+    CategorySortField,
+    CollectionSortField,
+    ProductOrder,
+    ProductOrderField,
+    ProductTypeSortField,
+)
+
+if TYPE_CHECKING:
+    from django.db.models.query import QuerySet
 
 PRODUCT_SEARCH_FIELDS = ("name", "description")
+PRODUCT_TYPE_SEARCH_FIELDS = ("name",)
 CATEGORY_SEARCH_FIELDS = ("name", "slug", "description", "parent__name")
 COLLECTION_SEARCH_FIELDS = ("name", "slug")
 ATTRIBUTES_SEARCH_FIELDS = ("name", "slug")
 
 
-def _filter_attributes_by_product_types(attribute_qs, product_qs):
-    product_types = set(product_qs.values_list("product_type_id", flat=True))
-    return attribute_qs.filter(
-        Q(product_type__in=product_types) | Q(product_variant_type__in=product_types)
-    )
-
-
-def resolve_attributes(info, category_id=None, collection_id=None, query=None):
-    qs = models.Attribute.objects.all()
+def resolve_attributes(
+    info,
+    qs=None,
+    in_category=None,
+    in_collection=None,
+    query=None,
+    sort_by=None,
+    **_kwargs,
+):
+    qs = qs or models.Attribute.objects.get_visible_to_user(info.context.user)
     qs = filter_by_query_param(qs, query, ATTRIBUTES_SEARCH_FIELDS)
 
-    if category_id:
-        # Filter attributes by product types belonging to the given category.
-        category = graphene.Node.get_node_from_global_id(info, category_id, Category)
-        if category:
-            tree = category.get_descendants(include_self=True)
-            product_qs = models.Product.objects.filter(category__in=tree)
-            qs = _filter_attributes_by_product_types(qs, product_qs)
-        else:
-            qs = qs.none()
+    if in_category:
+        qs = filter_attributes_by_product_types(qs, "in_category", in_category)
 
-    if collection_id:
-        # Filter attributes by product types belonging to the given collection.
-        collection = graphene.Node.get_node_from_global_id(
-            info, collection_id, Collection
-        )
-        if collection:
-            product_qs = collection.products.all()
-            qs = _filter_attributes_by_product_types(qs, product_qs)
-        else:
-            qs = qs.none()
+    if in_collection:
+        qs = filter_attributes_by_product_types(qs, "in_collection", in_collection)
 
-    qs = qs.order_by("name")
+    if sort_by:
+        qs = sort_queryset(qs, sort_by, AttributeSortField)
+    else:
+        qs = qs.order_by("name")
+
     qs = qs.distinct()
     return gql_optimizer.query(qs, info)
 
 
-def resolve_categories(info, query, level=None):
+def resolve_categories(info, query, level=None, sort_by=None, **_kwargs):
     qs = models.Category.objects.prefetch_related("children")
     if level is not None:
         qs = qs.filter(level=level)
     qs = filter_by_query_param(qs, query, CATEGORY_SEARCH_FIELDS)
-    qs = qs.order_by("name")
+    qs = sort_queryset(qs, sort_by, CategorySortField)
     qs = qs.distinct()
     return gql_optimizer.query(qs, info)
 
 
-def resolve_collections(info, query):
+def resolve_collections(info, query, sort_by=None, **_kwargs):
     user = info.context.user
     qs = models.Collection.objects.visible_to_user(user)
     qs = filter_by_query_param(qs, query, COLLECTION_SEARCH_FIELDS)
-    qs = qs.order_by("name")
+    qs = sort_queryset(qs, sort_by, CollectionSortField)
     return gql_optimizer.query(qs, info)
 
 
 def resolve_digital_contents(info):
     qs = models.DigitalContent.objects.all()
     return gql_optimizer.query(qs, info)
+
+
+def sort_products(qs: models.ProductsQueryset, sort_by: ProductOrder) -> "QuerySet":
+    if sort_by is None:
+        return qs
+
+    # Check if one of the required fields was provided
+    if sort_by.field and sort_by.attribute_id:
+        raise GraphQLError(
+            "You must provide either `field` or `attributeId` to sort the products."
+        )
+
+    if not sort_by.field and not sort_by.attribute_id:
+        return qs
+
+    if sort_by.field:
+        return sort_queryset(qs, sort_by, ProductOrderField)
+    return sort_products_by_attribute(qs, sort_by)
+
+
+def sort_products_by_attribute(
+    qs: models.ProductsQueryset, sort_by: ProductOrder
+) -> models.ProductsQueryset:
+    direction = sort_by.direction
+
+    # If an attribute ID was passed, attempt to convert it
+    if sort_by.attribute_id:
+        graphene_type, attribute_pk = from_global_id(sort_by.attribute_id)
+        is_ascending = direction == OrderDirection.ASC
+
+        # If the passed attribute ID is valid, execute the sorting
+        if attribute_pk.isnumeric() and graphene_type == "Attribute":
+            qs = qs.sort_by_attribute(attribute_pk, ascending=is_ascending)
+
+    return qs
 
 
 def resolve_products(
@@ -89,14 +137,17 @@ def resolve_products(
     collections=None,
     price_lte=None,
     price_gte=None,
+    minimal_price_lte=None,
+    minimal_price_gte=None,
     sort_by=None,
     stock_availability=None,
     query=None,
     **_kwargs,
 ):
 
-    user = info.context.user
+    user = get_user_or_service_account_from_context(info.context)
     qs = models.Product.objects.visible_to_user(user)
+    qs = sort_products(qs, sort_by)
 
     if query:
         search = picker.pick_backend()
@@ -106,25 +157,30 @@ def resolve_products(
         qs = filter_products_by_attributes(qs, attributes)
 
     if categories:
-        categories = get_nodes(categories, Category)
+        categories = get_nodes(categories, "Category", models.Category)
         qs = filter_products_by_categories(qs, categories)
 
     if collections:
-        collections = get_nodes(collections, Collection)
+        collections = get_nodes(collections, "Collection", models.Collection)
         qs = filter_products_by_collections(qs, collections)
+
     if stock_availability:
         qs = filter_products_by_stock_availability(qs, stock_availability)
 
     qs = filter_products_by_price(qs, price_lte, price_gte)
-    qs = sort_qs(qs, sort_by)
+    qs = filter_products_by_minimal_price(qs, minimal_price_lte, minimal_price_gte)
     qs = qs.distinct()
 
     return gql_optimizer.query(qs, info)
 
 
-def resolve_product_types(info):
+def resolve_product_types(info, query, sort_by=None, **_kwargs):
     qs = models.ProductType.objects.all()
-    qs = qs.order_by("name")
+    qs = filter_by_query_param(qs, query, PRODUCT_TYPE_SEARCH_FIELDS)
+    if sort_by:
+        qs = sort_queryset(qs, sort_by, ProductTypeSortField)
+    else:
+        qs = qs.order_by("name")
     return gql_optimizer.query(qs, info)
 
 
@@ -135,9 +191,7 @@ def resolve_product_variants(info, ids=None):
     )
     qs = models.ProductVariant.objects.filter(product__id__in=visible_products)
     if ids:
-        db_ids = [
-            get_database_id(info, node_id, only_type=ProductVariant) for node_id in ids
-        ]
+        db_ids = [get_database_id(info, node_id, "ProductVariant") for node_id in ids]
         qs = qs.filter(pk__in=db_ids)
     return gql_optimizer.query(qs, info)
 

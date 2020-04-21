@@ -26,17 +26,42 @@ def test_product_details(product, api_client, count_queries):
           name
           stockQuantity
           isAvailable
-          price {
-            currency
-            amount
-            localized
+          pricing {
+            discountLocalCurrency {
+              currency
+              gross {
+                amount
+                localized
+              }
+            }
+            price {
+              currency
+              gross {
+                amount
+                localized
+              }
+            }
+            priceUndiscounted {
+              currency
+              gross {
+                amount
+                localized
+              }
+            }
+            priceLocalCurrency {
+              currency
+              gross {
+                amount
+                localized
+              }
+            }
           }
           attributes {
             attribute {
               id
               name
             }
-            value {
+            values {
               id
               name
               value: name
@@ -59,19 +84,59 @@ def test_product_details(product, api_client, count_queries):
                       id
                       name
                     }
-                    price {
-                      amount
-                      currency
-                      localized
+                    pricing {
+                      priceRange {
+                        start{
+                          currency
+                          gross {
+                            amount
+                            localized
+                          }
+                        }
+                        stop{
+                          currency
+                          gross {
+                            amount
+                            localized
+                          }
+                        }
+                      }
+                      priceRangeUndiscounted {
+                        start{
+                          currency
+                          gross {
+                            amount
+                            localized
+                          }
+                        }
+                        stop{
+                          currency
+                          gross {
+                            amount
+                            localized
+                          }
+                        }
+                      }
+                      priceRangeLocalCurrency {
+                        start{
+                          currency
+                          gross {
+                            amount
+                            localized
+                          }
+                        }
+                        stop{
+                          currency
+                          gross {
+                            amount
+                            localized
+                          }
+                        }
+                      }
                     }
                   }
                 }
               }
-            }
-            price {
-              amount
-              currency
-              localized
             }
             images {
               id
@@ -82,12 +147,34 @@ def test_product_details(product, api_client, count_queries):
             }
             seoDescription
             seoTitle
-            availability {
-              available
-            }
+            isAvailable
           }
         }
     """
 
     variables = {"id": Node.to_global_id("Product", product.pk)}
+    get_graphql_content(api_client.post_graphql(query, variables))
+
+
+@pytest.mark.django_db
+@pytest.mark.count_queries(autouse=False)
+def test_retrieve_product_attributes(product_list, api_client, count_queries):
+    query = """
+        query($sortBy: ProductOrder) {
+          products(first: 10, sortBy: $sortBy) {
+            edges {
+              node {
+                id
+                attributes {
+                  attribute {
+                    id
+                  }
+                }
+              }
+            }
+          }
+        }
+    """
+
+    variables = {}
     get_graphql_content(api_client.post_graphql(query, variables))

@@ -1,7 +1,9 @@
 import graphene
 
+from ...core.permissions import ShippingPermissions
 from ...shipping import models
 from ..core.mutations import ModelBulkDeleteMutation
+from ..core.types.common import ShippingError
 
 
 class ShippingZoneBulkDelete(ModelBulkDeleteMutation):
@@ -15,7 +17,9 @@ class ShippingZoneBulkDelete(ModelBulkDeleteMutation):
     class Meta:
         description = "Deletes shipping zones."
         model = models.ShippingZone
-        permissions = ("shipping.manage_shipping",)
+        permissions = (ShippingPermissions.MANAGE_SHIPPING,)
+        error_type_class = ShippingError
+        error_type_field = "shipping_errors"
 
 
 class ShippingPriceBulkDelete(ModelBulkDeleteMutation):
@@ -29,4 +33,6 @@ class ShippingPriceBulkDelete(ModelBulkDeleteMutation):
     class Meta:
         description = "Deletes shipping prices."
         model = models.ShippingMethod
-        permissions = ("shipping.manage_shipping",)
+        permissions = (ShippingPermissions.MANAGE_SHIPPING,)
+        error_type_class = ShippingError
+        error_type_field = "shipping_errors"

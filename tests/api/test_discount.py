@@ -5,9 +5,9 @@ import graphene
 import pytest
 from django.utils import timezone
 from django_countries import countries
-from freezegun import freeze_time
 
 from saleor.discount import DiscountValueType, VoucherType
+from saleor.discount.error_codes import DiscountErrorCode
 from saleor.discount.models import Sale, Voucher
 from saleor.graphql.discount.enums import DiscountValueTypeEnum, VoucherTypeEnum
 from tests.api.utils import get_graphql_content
@@ -154,13 +154,14 @@ mutation  voucherCreate(
                 startDate: $startDate, endDate: $endDate, usageLimit: $usageLimit
                 applyOncePerOrder: $applyOncePerOrder,
                 applyOncePerCustomer: $applyOncePerCustomer}) {
-            errors {
+            discountErrors {
                 field
+                code
                 message
             }
             voucher {
                 type
-                minAmountSpent {
+                minSpent {
                     amount
                 }
                 minCheckoutItemsQuantity
@@ -177,7 +178,6 @@ mutation  voucherCreate(
 """
 
 
-@freeze_time("2010-05-31 12:00:01")
 def test_create_voucher(staff_api_client, permission_manage_discounts):
     start_date = timezone.now() - timedelta(days=365)
     end_date = timezone.now() + timedelta(days=365)
@@ -202,7 +202,7 @@ def test_create_voucher(staff_api_client, permission_manage_discounts):
     get_graphql_content(response)
     voucher = Voucher.objects.get()
     assert voucher.type == VoucherType.ENTIRE_ORDER
-    assert voucher.min_amount_spent.amount == Decimal("1.12")
+    assert voucher.min_spent_amount == Decimal("1.12")
     assert voucher.name == "test voucher"
     assert voucher.code == "testcode123"
     assert voucher.discount_value_type == DiscountValueType.FIXED
@@ -213,7 +213,6 @@ def test_create_voucher(staff_api_client, permission_manage_discounts):
     assert voucher.usage_limit == 3
 
 
-@freeze_time("2010-05-31 12:00:01")
 def test_create_voucher_with_empty_code(staff_api_client, permission_manage_discounts):
     start_date = timezone.now() - timedelta(days=365)
     end_date = timezone.now() + timedelta(days=365)
@@ -223,7 +222,7 @@ def test_create_voucher_with_empty_code(staff_api_client, permission_manage_disc
         "code": "",
         "discountValueType": DiscountValueTypeEnum.FIXED.name,
         "discountValue": 10.12,
-        "minAmountSpent": 1.12,
+        "minSpent": 1.12,
         "startDate": start_date.isoformat(),
         "endDate": end_date.isoformat(),
         "usageLimit": None,
@@ -238,35 +237,6 @@ def test_create_voucher_with_empty_code(staff_api_client, permission_manage_disc
     assert data["code"] != ""
 
 
-@freeze_time("2010-05-31 12:00:01")
-def test_create_voucher_with_deprecated_type(
-    staff_api_client, permission_manage_discounts
-):
-    start_date = timezone.now() - timedelta(days=365)
-    end_date = timezone.now() + timedelta(days=365)
-    variables = {
-        "name": "test voucher",
-        "type": VoucherTypeEnum.VALUE.name,
-        "code": "",
-        "discountValueType": DiscountValueTypeEnum.FIXED.name,
-        "discountValue": 10.12,
-        "minAmountSpent": 1.12,
-        "startDate": start_date.isoformat(),
-        "endDate": end_date.isoformat(),
-        "usageLimit": 0,
-    }
-
-    response = staff_api_client.post_graphql(
-        CREATE_VOUCHER_MUTATION, variables, permissions=[permission_manage_discounts]
-    )
-    content = get_graphql_content(response)
-    data = content["data"]["voucherCreate"]["voucher"]
-    assert data["name"] == variables["name"]
-    assert data["code"] != ""
-    assert data["type"] == VoucherTypeEnum.ENTIRE_ORDER.name
-
-
-@freeze_time("2010-05-31 12:00:01")
 def test_create_voucher_with_existing_gift_card_code(
     staff_api_client, gift_card, permission_manage_discounts
 ):
@@ -288,13 +258,13 @@ def test_create_voucher_with_existing_gift_card_code(
         CREATE_VOUCHER_MUTATION, variables, permissions=[permission_manage_discounts]
     )
     content = get_graphql_content(response)
-    assert content["data"]["voucherCreate"]["errors"]
-    errors = content["data"]["voucherCreate"]["errors"]
+    assert content["data"]["voucherCreate"]["discountErrors"]
+    errors = content["data"]["voucherCreate"]["discountErrors"]
     assert len(errors) == 1
-    assert errors[0]["field"] == "promoCode"
+    assert errors[0]["field"] == "code"
+    assert errors[0]["code"] == DiscountErrorCode.ALREADY_EXISTS.name
 
 
-@freeze_time("2010-05-31 12:00:01")
 def test_create_voucher_with_existing_voucher_code(
     staff_api_client, voucher_shipping_type, permission_manage_discounts
 ):
@@ -315,10 +285,11 @@ def test_create_voucher_with_existing_voucher_code(
         CREATE_VOUCHER_MUTATION, variables, permissions=[permission_manage_discounts]
     )
     content = get_graphql_content(response)
-    assert content["data"]["voucherCreate"]["errors"]
-    errors = content["data"]["voucherCreate"]["errors"]
+    assert content["data"]["voucherCreate"]["discountErrors"]
+    errors = content["data"]["voucherCreate"]["discountErrors"]
     assert len(errors) == 1
-    assert errors[0]["field"] == "promoCode"
+    assert errors[0]["field"] == "code"
+    assert errors
 
 
 def test_update_voucher(staff_api_client, voucher, permission_manage_discounts):
@@ -331,8 +302,9 @@ def test_update_voucher(staff_api_client, voucher, permission_manage_discounts):
                 applyOncePerOrder: $applyOncePerOrder,
                 minCheckoutItemsQuantity: $minCheckoutItemsQuantity
                 }) {
-                errors {
+                discountErrors {
                     field
+                    code
                     message
                 }
                 voucher {
@@ -378,8 +350,9 @@ def test_voucher_delete_mutation(
                     name
                     id
                 }
-                errors {
+                discountErrors {
                     field
+                    code
                     message
                 }
               }
@@ -408,8 +381,9 @@ def test_voucher_add_catalogues(
     query = """
         mutation voucherCataloguesAdd($id: ID!, $input: CatalogueInput!) {
             voucherCataloguesAdd(id: $id, input: $input) {
-                errors {
+                discountErrors {
                     field
+                    code
                     message
                 }
             }
@@ -433,7 +407,7 @@ def test_voucher_add_catalogues(
     content = get_graphql_content(response)
     data = content["data"]["voucherCataloguesAdd"]
 
-    assert not data["errors"]
+    assert not data["discountErrors"]
     assert product in voucher.products.all()
     assert category in voucher.categories.all()
     assert collection in voucher.collections.all()
@@ -454,8 +428,9 @@ def test_voucher_remove_catalogues(
     query = """
         mutation voucherCataloguesRemove($id: ID!, $input: CatalogueInput!) {
             voucherCataloguesRemove(id: $id, input: $input) {
-                errors {
+                discountErrors {
                     field
+                    code
                     message
                 }
             }
@@ -479,7 +454,7 @@ def test_voucher_remove_catalogues(
     content = get_graphql_content(response)
     data = content["data"]["voucherCataloguesRemove"]
 
-    assert not data["errors"]
+    assert not data["discountErrors"]
     assert product not in voucher.products.all()
     assert category not in voucher.categories.all()
     assert collection not in voucher.collections.all()
@@ -491,8 +466,9 @@ def test_voucher_add_no_catalogues(
     query = """
         mutation voucherCataloguesAdd($id: ID!, $input: CatalogueInput!) {
             voucherCataloguesAdd(id: $id, input: $input) {
-                errors {
+                discountErrors {
                     field
+                    code
                     message
                 }
             }
@@ -508,7 +484,7 @@ def test_voucher_add_no_catalogues(
     content = get_graphql_content(response)
     data = content["data"]["voucherCataloguesAdd"]
 
-    assert not data["errors"]
+    assert not data["discountErrors"]
     assert not voucher.products.exists()
     assert not voucher.categories.exists()
     assert not voucher.collections.exists()
@@ -529,8 +505,9 @@ def test_voucher_remove_no_catalogues(
     query = """
             mutation voucherCataloguesAdd($id: ID!, $input: CatalogueInput!) {
                 voucherCataloguesAdd(id: $id, input: $input) {
-                    errors {
+                    discountErrors {
                         field
+                        code
                         message
                     }
                 }
@@ -546,13 +523,12 @@ def test_voucher_remove_no_catalogues(
     content = get_graphql_content(response)
     data = content["data"]["voucherCataloguesAdd"]
 
-    assert not data["errors"]
+    assert not data["discountErrors"]
     assert voucher.products.exists()
     assert voucher.categories.exists()
     assert voucher.collections.exists()
 
 
-@freeze_time("2010-05-31 12:00:01")
 def test_create_sale(staff_api_client, permission_manage_discounts):
     query = """
     mutation  saleCreate(
@@ -568,8 +544,9 @@ def test_create_sale(staff_api_client, permission_manage_discounts):
                 startDate
                 endDate
             }
-            errors {
+            discountErrors {
                 field
+                code
                 message
             }
         }
@@ -602,8 +579,9 @@ def test_update_sale(staff_api_client, sale, permission_manage_discounts):
     query = """
     mutation  saleUpdate($type: DiscountValueTypeEnum, $id: ID!) {
             saleUpdate(id: $id, input: {type: $type}) {
-                errors {
+                discountErrors {
                     field
+                    code
                     message
                 }
                 sale {
@@ -636,8 +614,9 @@ def test_sale_delete_mutation(staff_api_client, sale, permission_manage_discount
                     name
                     id
                 }
-                errors {
+                discountErrors {
                     field
+                    code
                     message
                 }
               }
@@ -661,8 +640,9 @@ def test_sale_add_catalogues(
     query = """
         mutation saleCataloguesAdd($id: ID!, $input: CatalogueInput!) {
             saleCataloguesAdd(id: $id, input: $input) {
-                errors {
+                discountErrors {
                     field
+                    code
                     message
                 }
             }
@@ -686,7 +666,7 @@ def test_sale_add_catalogues(
     content = get_graphql_content(response)
     data = content["data"]["saleCataloguesAdd"]
 
-    assert not data["errors"]
+    assert not data["discountErrors"]
     assert product in sale.products.all()
     assert category in sale.categories.all()
     assert collection in sale.collections.all()
@@ -702,8 +682,9 @@ def test_sale_remove_catalogues(
     query = """
         mutation saleCataloguesRemove($id: ID!, $input: CatalogueInput!) {
             saleCataloguesRemove(id: $id, input: $input) {
-                errors {
+                discountErrors {
                     field
+                    code
                     message
                 }
             }
@@ -727,7 +708,7 @@ def test_sale_remove_catalogues(
     content = get_graphql_content(response)
     data = content["data"]["saleCataloguesRemove"]
 
-    assert not data["errors"]
+    assert not data["discountErrors"]
     assert product not in sale.products.all()
     assert category not in sale.categories.all()
     assert collection not in sale.collections.all()
@@ -737,8 +718,9 @@ def test_sale_add_no_catalogues(staff_api_client, sale, permission_manage_discou
     query = """
         mutation saleCataloguesAdd($id: ID!, $input: CatalogueInput!) {
             saleCataloguesAdd(id: $id, input: $input) {
-                errors {
+                discountErrors {
                     field
+                    code
                     message
                 }
             }
@@ -754,7 +736,7 @@ def test_sale_add_no_catalogues(staff_api_client, sale, permission_manage_discou
     content = get_graphql_content(response)
     data = content["data"]["saleCataloguesAdd"]
 
-    assert not data["errors"]
+    assert not data["discountErrors"]
     assert not sale.products.exists()
     assert not sale.categories.exists()
     assert not sale.collections.exists()
@@ -770,8 +752,9 @@ def test_sale_remove_no_catalogues(
     query = """
         mutation saleCataloguesAdd($id: ID!, $input: CatalogueInput!) {
             saleCataloguesAdd(id: $id, input: $input) {
-                errors {
+                discountErrors {
                     field
+                    code
                     message
                 }
             }
@@ -787,13 +770,12 @@ def test_sale_remove_no_catalogues(
     content = get_graphql_content(response)
     data = content["data"]["saleCataloguesAdd"]
 
-    assert not data["errors"]
+    assert not data["discountErrors"]
     assert sale.products.exists()
     assert sale.categories.exists()
     assert sale.collections.exists()
 
 
-@freeze_time("2019-05-31 12:00:01")
 @pytest.mark.parametrize(
     "voucher_filter, start_date, end_date, count",
     [
@@ -991,7 +973,126 @@ def test_query_vouchers_with_filter_search(
     assert len(data) == count
 
 
-@freeze_time("2019-05-31 12:00:01")
+QUERY_VOUCHER_WITH_SORT = """
+    query ($sort_by: VoucherSortingInput!) {
+        vouchers(first:5, sortBy: $sort_by) {
+            edges{
+                node{
+                    name
+                }
+            }
+        }
+    }
+"""
+
+
+@pytest.mark.parametrize(
+    "voucher_sort, result_order",
+    [
+        (
+            {"field": "CODE", "direction": "ASC"},
+            ["Voucher2", "Voucher1", "FreeShipping"],
+        ),
+        (
+            {"field": "CODE", "direction": "DESC"},
+            ["FreeShipping", "Voucher1", "Voucher2"],
+        ),
+        (
+            {"field": "VALUE", "direction": "ASC"},
+            ["Voucher2", "FreeShipping", "Voucher1"],
+        ),
+        (
+            {"field": "VALUE", "direction": "DESC"},
+            ["Voucher1", "FreeShipping", "Voucher2"],
+        ),
+        (
+            {"field": "TYPE", "direction": "ASC"},
+            ["Voucher1", "Voucher2", "FreeShipping"],
+        ),
+        (
+            {"field": "TYPE", "direction": "DESC"},
+            ["FreeShipping", "Voucher1", "Voucher2"],
+        ),
+        (
+            {"field": "START_DATE", "direction": "ASC"},
+            ["FreeShipping", "Voucher2", "Voucher1"],
+        ),
+        (
+            {"field": "START_DATE", "direction": "DESC"},
+            ["Voucher1", "Voucher2", "FreeShipping"],
+        ),
+        (
+            {"field": "END_DATE", "direction": "ASC"},
+            ["Voucher2", "FreeShipping", "Voucher1"],
+        ),
+        (
+            {"field": "END_DATE", "direction": "DESC"},
+            ["Voucher1", "FreeShipping", "Voucher2"],
+        ),
+        (
+            {"field": "USAGE_LIMIT", "direction": "ASC"},
+            ["Voucher1", "FreeShipping", "Voucher2"],
+        ),
+        (
+            {"field": "USAGE_LIMIT", "direction": "DESC"},
+            ["Voucher2", "FreeShipping", "Voucher1"],
+        ),
+        (
+            {"field": "MINIMUM_SPENT_AMOUNT", "direction": "ASC"},
+            ["Voucher2", "FreeShipping", "Voucher1"],
+        ),
+        (
+            {"field": "MINIMUM_SPENT_AMOUNT", "direction": "DESC"},
+            ["Voucher1", "FreeShipping", "Voucher2"],
+        ),
+    ],
+)
+def test_query_vouchers_with_sort(
+    voucher_sort, result_order, staff_api_client, permission_manage_discounts
+):
+    Voucher.objects.bulk_create(
+        [
+            Voucher(
+                name="Voucher1",
+                discount_value=123,
+                code="abc",
+                discount_value_type=DiscountValueType.FIXED,
+                type=VoucherType.ENTIRE_ORDER,
+                usage_limit=10,
+            ),
+            Voucher(
+                name="Voucher2",
+                discount_value=23,
+                code="123",
+                discount_value_type=DiscountValueType.FIXED,
+                type=VoucherType.ENTIRE_ORDER,
+                start_date=timezone.now().replace(year=2012, month=1, day=5),
+                end_date=timezone.now().replace(year=2013, month=1, day=5),
+                min_spent_amount=50,
+            ),
+            Voucher(
+                name="FreeShipping",
+                discount_value=100,
+                code="xyz",
+                discount_value_type=DiscountValueType.PERCENTAGE,
+                type=VoucherType.SHIPPING,
+                start_date=timezone.now().replace(year=2011, month=1, day=5),
+                end_date=timezone.now().replace(year=2015, month=12, day=31),
+                usage_limit=1000,
+                min_spent_amount=500,
+            ),
+        ]
+    )
+    variables = {"sort_by": voucher_sort}
+    staff_api_client.user.user_permissions.add(permission_manage_discounts)
+    response = staff_api_client.post_graphql(QUERY_VOUCHER_WITH_SORT, variables)
+    content = get_graphql_content(response)
+    vouchers = content["data"]["vouchers"]["edges"]
+
+    for order, voucher_name in enumerate(result_order):
+        assert vouchers[order]["node"]["name"] == voucher_name
+
+
 @pytest.mark.parametrize(
     "sale_filter, start_date, end_date, count",
     [
@@ -1147,3 +1248,63 @@ def test_query_sales_with_filter_search(
     content = get_graphql_content(response)
     data = content["data"]["sales"]["edges"]
     assert len(data) == count
+
+
+QUERY_SALE_WITH_SORT = """
+    query ($sort_by: SaleSortingInput!) {
+        sales(first:5, sortBy: $sort_by) {
+            edges{
+                node{
+                    name
+                }
+            }
+        }
+    }
+"""
+
+
+@pytest.mark.parametrize(
+    "sale_sort, result_order",
+    [
+        ({"field": "NAME", "direction": "ASC"}, ["BigSale", "Sale2", "Sale3"]),
+        ({"field": "NAME", "direction": "DESC"}, ["Sale3", "Sale2", "BigSale"]),
+        ({"field": "VALUE", "direction": "ASC"}, ["Sale3", "Sale2", "BigSale"]),
+        ({"field": "VALUE", "direction": "DESC"}, ["BigSale", "Sale2", "Sale3"]),
+        ({"field": "TYPE", "direction": "ASC"}, ["Sale2", "Sale3", "BigSale"]),
+        ({"field": "TYPE", "direction": "DESC"}, ["BigSale", "Sale2", "Sale3"]),
+        ({"field": "START_DATE", "direction": "ASC"}, ["Sale3", "Sale2", "BigSale"]),
+        ({"field": "START_DATE", "direction": "DESC"}, ["BigSale", "Sale2", "Sale3"]),
+        ({"field": "END_DATE", "direction": "ASC"}, ["Sale2", "Sale3", "BigSale"]),
+        ({"field": "END_DATE", "direction": "DESC"}, ["BigSale", "Sale3", "Sale2"]),
+    ],
+)
+def test_query_sales_with_sort(
+    sale_sort, result_order, staff_api_client, permission_manage_discounts
+):
+    Sale.objects.bulk_create(
+        [
+            Sale(name="BigSale", value=1234, type="PERCENTAGE"),
+            Sale(
+                name="Sale2",
+                value=123,
+                type="FIXED",
+                start_date=timezone.now().replace(year=2012, month=1, day=5),
+                end_date=timezone.now().replace(year=2013, month=1, day=5),
+            ),
+            Sale(
+                name="Sale3",
+                value=69,
+                type="FIXED",
+                start_date=timezone.now().replace(year=2011, month=1, day=5),
+                end_date=timezone.now().replace(year=2015, month=12, day=31),
+            ),
+        ]
+    )
+    variables = {"sort_by": sale_sort}
+    staff_api_client.user.user_permissions.add(permission_manage_discounts)
+    response = staff_api_client.post_graphql(QUERY_SALE_WITH_SORT, variables)
+    content = get_graphql_content(response)
+    sales = content["data"]["sales"]["edges"]
+
+    for order, sale_name in enumerate(result_order):
+        assert sales[order]["node"]["name"] == sale_name
