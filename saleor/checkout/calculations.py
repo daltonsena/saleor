@@ -1,5 +1,6 @@
 from typing import TYPE_CHECKING, Iterable, Optional
 
+from ..core.taxes import quantize_price
 from ..discount import DiscountInfo
 from ..plugins.manager import get_plugins_manager
 
@@ -9,27 +10,42 @@ if TYPE_CHECKING:
 
 
 def checkout_shipping_price(
-    checkout: "Checkout", discounts: Optional[Iterable[DiscountInfo]] = None
+    *,
+    checkout: "Checkout",
+    lines: Iterable["CheckoutLine"],
+    discounts: Optional[Iterable[DiscountInfo]] = None,
 ) -> "TaxedMoney":
     """Return checkout shipping price.
 
     It takes in account all plugins.
     """
-    return get_plugins_manager().calculate_checkout_shipping(checkout, discounts or [])
+    calculated_checkout_shipping = get_plugins_manager().calculate_checkout_shipping(
+        checkout, lines, discounts or []
+    )
+    return quantize_price(calculated_checkout_shipping, checkout.currency)
 
 
 def checkout_subtotal(
-    checkout: "Checkout", discounts: Optional[Iterable[DiscountInfo]] = None
+    *,
+    checkout: "Checkout",
+    lines: Iterable["CheckoutLine"],
+    discounts: Optional[Iterable[DiscountInfo]] = None,
 ) -> "TaxedMoney":
     """Return the total cost of all the checkout lines, taxes included.
 
     It takes in account all plugins.
     """
-    return get_plugins_manager().calculate_checkout_subtotal(checkout, discounts or [])
+    calculated_checkout_subtotal = get_plugins_manager().calculate_checkout_subtotal(
+        checkout, lines, discounts or []
+    )
+    return quantize_price(calculated_checkout_subtotal, checkout.currency)
 
 
 def checkout_total(
-    checkout: "Checkout", discounts: Optional[Iterable[DiscountInfo]] = None
+    *,
+    checkout: "Checkout",
+    lines: Iterable["CheckoutLine"],
+    discounts: Optional[Iterable[DiscountInfo]] = None,
 ) -> "TaxedMoney":
     """Return the total cost of the checkout.
 
@@ -38,14 +54,20 @@ def checkout_total(
 
     It takes in account all plugins.
     """
-    return get_plugins_manager().calculate_checkout_total(checkout, discounts or [])
+    calculated_checkout_total = get_plugins_manager().calculate_checkout_total(
+        checkout, lines, discounts or []
+    )
+    return quantize_price(calculated_checkout_total, checkout.currency)
 
 
 def checkout_line_total(
-    line: "CheckoutLine", discounts: Optional[Iterable[DiscountInfo]] = None
+    *, line: "CheckoutLine", discounts: Optional[Iterable[DiscountInfo]] = None
 ) -> "TaxedMoney":
     """Return the total price of provided line, taxes included.
 
     It takes in account all plugins.
     """
-    return get_plugins_manager().calculate_checkout_line_total(line, discounts or [])
+    calculated_line_total = get_plugins_manager().calculate_checkout_line_total(
+        line, discounts or []
+    )
+    return quantize_price(calculated_line_total, line.checkout.currency)

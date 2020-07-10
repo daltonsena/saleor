@@ -3,7 +3,8 @@ from typing import Dict, List, Optional
 
 import django_filters
 import graphene
-from django.db.models import Q, Subquery, Sum
+from django.db.models import F, Q, Subquery, Sum
+from django.db.models.functions import Coalesce
 from graphene_django.filter import GlobalIDFilter, GlobalIDMultipleChoiceFilter
 
 from ...product.filters import filter_products_by_attributes_values
@@ -21,21 +22,15 @@ from ..core.filters import EnumFilter, ListObjectTypeFilter, ObjectTypeFilter
 from ..core.types import FilterInputObjectType
 from ..core.types.common import IntRangeInput, PriceRangeInput
 from ..core.utils import from_global_id_strict_type
-from ..utils import (
-    filter_by_query_param,
-    filter_range_field,
-    get_nodes,
-    resolve_global_ids_to_primary_keys,
-)
+from ..utils import get_nodes, resolve_global_ids_to_primary_keys
+from ..utils.filters import filter_by_query_param, filter_range_field
 from ..warehouse import types as warehouse_types
-from . import types
 from .enums import (
     CollectionPublished,
     ProductTypeConfigurable,
     ProductTypeEnum,
     StockAvailability,
 )
-from .types.attributes import AttributeInput
 
 
 def filter_fields_containing_value(*search_fields: str):
@@ -82,11 +77,11 @@ def filter_products_by_attributes(qs, filter_value):
     return filter_products_by_attributes_values(qs, queries)
 
 
-def filter_products_by_price(qs, price_lte=None, price_gte=None):
+def filter_products_by_variant_price(qs, price_lte=None, price_gte=None):
     if price_lte:
-        qs = qs.filter(price_amount__lte=price_lte)
+        qs = qs.filter(variants__price_amount__lte=price_lte)
     if price_gte:
-        qs = qs.filter(price_amount__gte=price_gte)
+        qs = qs.filter(variants__price_amount__gte=price_gte)
     return qs
 
 
@@ -115,10 +110,13 @@ def filter_products_by_collections(qs, collections):
 def filter_products_by_stock_availability(qs, stock_availability):
     total_stock = (
         Stock.objects.select_related("product_variant")
-        .annotate_available_quantity()
         .values("product_variant__product_id")
-        .annotate(total_quantity=Sum("available_quantity"))
-        .filter(total_quantity__lte=0)
+        .annotate(
+            total_quantity_allocated=Coalesce(Sum("allocations__quantity_allocated"), 0)
+        )
+        .annotate(total_quantity=Coalesce(Sum("quantity"), 0))
+        .annotate(total_available=F("total_quantity") - F("total_quantity_allocated"))
+        .filter(total_available__lte=0)
         .values_list("product_variant__product_id", flat=True)
     )
     if stock_availability == StockAvailability.IN_STOCK:
@@ -141,7 +139,7 @@ def filter_attributes(qs, _, value):
 
 def filter_categories(qs, _, value):
     if value:
-        categories = get_nodes(value, types.Category)
+        categories = get_nodes(value, "Category", Category)
         qs = filter_products_by_categories(qs, categories)
     return qs
 
@@ -152,13 +150,13 @@ def filter_has_category(qs, _, value):
 
 def filter_collections(qs, _, value):
     if value:
-        collections = get_nodes(value, types.Collection)
+        collections = get_nodes(value, "Collection", Collection)
         qs = filter_products_by_collections(qs, collections)
     return qs
 
 
-def filter_price(qs, _, value):
-    qs = filter_products_by_price(
+def filter_variant_price(qs, _, value):
+    qs = filter_products_by_variant_price(
         qs, price_lte=value.get("lte"), price_gte=value.get("gte")
     )
     return qs
@@ -180,7 +178,7 @@ def filter_stock_availability(qs, _, value):
 def filter_search(qs, _, value):
     if value:
         search = picker.pick_backend()
-        qs &= search(value).distinct()
+        qs = qs.distinct() & search(value).distinct()
     return qs
 
 
@@ -298,16 +296,15 @@ class ProductFilter(django_filters.FilterSet):
     collections = GlobalIDMultipleChoiceFilter(method=filter_collections)
     categories = GlobalIDMultipleChoiceFilter(method=filter_categories)
     has_category = django_filters.BooleanFilter(method=filter_has_category)
-    price = ObjectTypeFilter(
-        input_class=PriceRangeInput, method=filter_price, field_name="price_amount"
-    )
+    price = ObjectTypeFilter(input_class=PriceRangeInput, method=filter_variant_price)
     minimal_price = ObjectTypeFilter(
         input_class=PriceRangeInput,
         method=filter_minimal_price,
         field_name="minimal_price_amount",
     )
     attributes = ListObjectTypeFilter(
-        input_class=AttributeInput, method=filter_attributes
+        input_class="saleor.graphql.product.types.attributes.AttributeInput",
+        method=filter_attributes,
     )
     stock_availability = EnumFilter(
         input_class=StockAvailability, method=filter_stock_availability
@@ -324,7 +321,6 @@ class ProductFilter(django_filters.FilterSet):
             "collections",
             "categories",
             "has_category",
-            "price",
             "attributes",
             "stock_availability",
             "product_type",

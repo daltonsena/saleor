@@ -1,15 +1,19 @@
 import ast
 import os.path
 import warnings
+from datetime import timedelta
 
 import dj_database_url
 import dj_email_url
+import django_cache_url
 import jaeger_client
 import jaeger_client.config
+import pkg_resources
 import sentry_sdk
 from django.core.exceptions import ImproperlyConfigured
 from django.core.management.utils import get_random_secret_key
 from django_prices.utils.formatting import get_currency_fraction
+from pytimeparse import parse
 from sentry_sdk.integrations.celery import CeleryIntegration
 from sentry_sdk.integrations.django import DjangoIntegration
 
@@ -65,7 +69,7 @@ DATABASES = {
 }
 
 
-TIME_ZONE = "America/Chicago"
+TIME_ZONE = "UTC"
 LANGUAGE_CODE = "en"
 LANGUAGES = [
     ("ar", "Arabic"),
@@ -82,6 +86,7 @@ LANGUAGES = [
     ("es-co", "Colombian Spanish"),
     ("et", "Estonian"),
     ("fa", "Persian"),
+    ("fi", "Finnish"),
     ("fr", "French"),
     ("hi", "Hindi"),
     ("hu", "Hungarian"),
@@ -101,10 +106,12 @@ LANGUAGES = [
     ("ro", "Romanian"),
     ("ru", "Russian"),
     ("sk", "Slovak"),
+    ("sl", "Slovenian"),
     ("sq", "Albanian"),
     ("sr", "Serbian"),
-    ("sw", "Swahili"),
     ("sv", "Swedish"),
+    ("sw", "Swahili"),
+    ("ta", "Tamil"),
     ("th", "Thai"),
     ("tr", "Turkish"),
     ("uk", "Ukrainian"),
@@ -200,12 +207,14 @@ if not SECRET_KEY and DEBUG:
 MIDDLEWARE = [
     "django.middleware.security.SecurityMiddleware",
     "django.middleware.common.CommonMiddleware",
+    "saleor.core.middleware.request_time",
     "saleor.core.middleware.discounts",
     "saleor.core.middleware.google_analytics",
     "saleor.core.middleware.country",
     "saleor.core.middleware.currency",
     "saleor.core.middleware.site",
     "saleor.core.middleware.plugins",
+    "saleor.core.middleware.jwt_refresh_token_middleware",
 ]
 
 INSTALLED_APPS = [
@@ -225,9 +234,11 @@ INSTALLED_APPS = [
     "saleor.product",
     "saleor.checkout",
     "saleor.core",
+    "saleor.csv",
     "saleor.graphql",
     "saleor.menu",
     "saleor.order",
+    "saleor.invoice",
     "saleor.seo",
     "saleor.shipping",
     "saleor.search",
@@ -238,6 +249,7 @@ INSTALLED_APPS = [
     "saleor.warehouse",
     "saleor.webhook",
     "saleor.wishlist",
+    "saleor.app",
     # External apps
     "versatileimagefield",
     "django_measurement",
@@ -280,53 +292,53 @@ if ENABLE_DEBUG_TOOLBAR:
 LOGGING = {
     "version": 1,
     "disable_existing_loggers": False,
-    "root": {"level": "INFO", "handlers": ["console"]},
+    "root": {"level": "INFO", "handlers": ["default"]},
     "formatters": {
+        "django.server": {
+            "()": "django.utils.log.ServerFormatter",
+            "format": "[{server_time}] {message}",
+            "style": "{",
+        },
+        "json": {
+            "()": "saleor.core.logging.JsonFormatter",
+            "datefmt": "%Y-%m-%dT%H:%M:%SZ",
+            "format": (
+                "%(asctime)s %(levelname)s %(lineno)s %(message)s %(name)s "
+                + "%(pathname)s %(process)d %(threadName)s"
+            ),
+        },
         "verbose": {
             "format": (
                 "%(levelname)s %(name)s %(message)s [PID:%(process)d:%(threadName)s]"
             )
         },
-        "simple": {"format": "%(levelname)s %(message)s"},
     },
-    "filters": {"require_debug_false": {"()": "django.utils.log.RequireDebugFalse"}},
     "handlers": {
-        "mail_admins": {
-            "level": "ERROR",
-            "filters": ["require_debug_false"],
-            "class": "django.utils.log.AdminEmailHandler",
-        },
-        "console": {
+        "default": {
             "level": "DEBUG",
             "class": "logging.StreamHandler",
-            "formatter": "verbose",
+            "formatter": "verbose" if DEBUG else "json",
         },
-        "null": {"class": "logging.NullHandler"},
+        "django.server": {
+            "level": "INFO",
+            "class": "logging.StreamHandler",
+            "formatter": "django.server" if DEBUG else "json",
+        },
     },
     "loggers": {
-        "django": {
-            "handlers": ["console", "mail_admins"],
+        "django": {"level": "INFO", "propagate": True},
+        "django.server": {
+            "handlers": ["django.server"],
             "level": "INFO",
-            "propagate": True,
+            "propagate": False,
         },
-        "django.server": {"handlers": ["console"], "level": "INFO", "propagate": True},
-        "saleor": {"handlers": ["console"], "level": "DEBUG", "propagate": True},
+        "saleor": {"level": "DEBUG", "propagate": True},
         "saleor.graphql.errors.handled": {
-            "handlers": ["console"],
+            "handlers": ["default"],
             "level": "ERROR",
-            "propagate": True,
+            "propagate": False,
         },
-        # You can configure this logger to go to another file using a file handler.
-        # Refer to https://docs.djangoproject.com/en/2.2/topics/logging/#examples.
-        # This allow easier filtering from GraphQL query/permission errors that may
-        # have been triggered by your frontend applications from the internal errors
-        # that happen in backend
-        "saleor.graphql.errors.unhandled": {
-            "handlers": ["console"],
-            "level": "ERROR",
-            "propagate": True,
-        },
-        "graphql.execution.utils": {"handlers": ["null"], "propagate": False},
+        "graphql.execution.utils": {"propagate": False},
     },
 }
 
@@ -357,19 +369,6 @@ COUNTRIES_OVERRIDE = {"EU": "European Union"}
 
 OPENEXCHANGERATES_API_KEY = os.environ.get("OPENEXCHANGERATES_API_KEY")
 
-# VAT configuration
-# Enabling vat requires valid vatlayer access key.
-# If you are subscribed to a paid vatlayer plan, you can enable HTTPS.
-VATLAYER_ACCESS_KEY = os.environ.get("VATLAYER_ACCESS_KEY")
-VATLAYER_USE_HTTPS = get_bool_from_env("VATLAYER_USE_HTTPS", False)
-
-# Avatax supports two ways of log in - username:password or account:license
-AVATAX_USERNAME_OR_ACCOUNT = os.environ.get("AVATAX_USERNAME_OR_ACCOUNT")
-AVATAX_PASSWORD_OR_LICENSE = os.environ.get("AVATAX_PASSWORD_OR_LICENSE")
-AVATAX_USE_SANDBOX = get_bool_from_env("AVATAX_USE_SANDBOX", DEBUG)
-AVATAX_COMPANY_NAME = os.environ.get("AVATAX_COMPANY_NAME", "DEFAULT")
-AVATAX_AUTOCOMMIT = get_bool_from_env("AVATAX_AUTOCOMMIT", False)
-
 GOOGLE_ANALYTICS_TRACKING_ID = os.environ.get("GOOGLE_ANALYTICS_TRACKING_ID")
 
 
@@ -383,12 +382,10 @@ PAYMENT_HOST = get_host
 
 PAYMENT_MODEL = "order.Payment"
 
-SESSION_SERIALIZER = "django.contrib.sessions.serializers.JSONSerializer"
-
-LOW_STOCK_THRESHOLD = 10
 MAX_CHECKOUT_LINE_QUANTITY = int(os.environ.get("MAX_CHECKOUT_LINE_QUANTITY", 50))
 
-TEST_RUNNER = "tests.runner.PytestTestRunner"
+TEST_RUNNER = "saleor.tests.runner.PytestTestRunner"
+
 
 PLAYGROUND_ENABLED = get_bool_from_env("PLAYGROUND_ENABLED", True)
 
@@ -404,6 +401,7 @@ AWS_LOCATION = os.environ.get("AWS_LOCATION", "")
 AWS_MEDIA_BUCKET_NAME = os.environ.get("AWS_MEDIA_BUCKET_NAME")
 AWS_MEDIA_CUSTOM_DOMAIN = os.environ.get("AWS_MEDIA_CUSTOM_DOMAIN")
 AWS_QUERYSTRING_AUTH = get_bool_from_env("AWS_QUERYSTRING_AUTH", False)
+AWS_QUERYSTRING_EXPIRE = get_bool_from_env("AWS_QUERYSTRING_EXPIRE", 3600)
 AWS_S3_CUSTOM_DOMAIN = os.environ.get("AWS_STATIC_CUSTOM_DOMAIN")
 AWS_S3_ENDPOINT_URL = os.environ.get("AWS_S3_ENDPOINT_URL", None)
 AWS_S3_REGION_NAME = os.environ.get("AWS_S3_REGION_NAME", None)
@@ -465,18 +463,12 @@ DEFAULT_PLACEHOLDER = "images/placeholder255x255.png"
 SEARCH_BACKEND = "saleor.search.backends.postgresql"
 
 AUTHENTICATION_BACKENDS = [
-    "graphql_jwt.backends.JSONWebTokenBackend",
+    "saleor.core.auth_backend.JSONWebTokenBackend",
     "django.contrib.auth.backends.ModelBackend",
 ]
 
-# Django GraphQL JWT settings
-GRAPHQL_JWT = {
-    "JWT_PAYLOAD_HANDLER": "saleor.graphql.utils.create_jwt_payload",
-}
-if not DEBUG:
-    GRAPHQL_JWT["JWT_VERIFY_EXPIRATION"] = True  # type: ignore
-
 # CELERY SETTINGS
+CELERY_TIMEZONE = TIME_ZONE
 CELERY_BROKER_URL = (
     os.environ.get("CELERY_BROKER_URL", os.environ.get("CLOUDAMQP_URL")) or ""
 )
@@ -509,7 +501,7 @@ GRAPHENE = {
     "MIDDLEWARE": [
         "saleor.graphql.middleware.OpentracingGrapheneMiddleware",
         "saleor.graphql.middleware.JWTMiddleware",
-        "saleor.graphql.middleware.service_account_middleware",
+        "saleor.graphql.middleware.app_middleware",
     ],
 }
 
@@ -523,7 +515,17 @@ PLUGINS = [
     "saleor.payment.gateways.stripe.plugin.StripeGatewayPlugin",
     "saleor.payment.gateways.braintree.plugin.BraintreeGatewayPlugin",
     "saleor.payment.gateways.razorpay.plugin.RazorpayGatewayPlugin",
+    "saleor.plugins.invoicing.plugin.InvoicingPlugin",
 ]
+
+# Plugin discovery
+installed_plugins = pkg_resources.iter_entry_points("saleor.plugins")
+for entry_point in installed_plugins:
+    plugin_path = "{}.{}".format(entry_point.module_name, entry_point.attrs[0])
+    if plugin_path not in PLUGINS:
+        if entry_point.name not in INSTALLED_APPS:
+            INSTALLED_APPS.append(entry_point.name)
+        PLUGINS.append(plugin_path)
 
 if (
     not DEBUG
@@ -557,3 +559,20 @@ if "JAEGER_AGENT_HOST" in os.environ:
         service_name="saleor",
         validate=True,
     ).initialize_tracer()
+
+
+# Some cloud providers (Heroku) export REDIS_URL variable instead of CACHE_URL
+REDIS_URL = os.environ.get("REDIS_URL")
+if REDIS_URL:
+    CACHE_URL = os.environ.setdefault("CACHE_URL", REDIS_URL)
+CACHES = {"default": django_cache_url.config()}
+
+# Default False because storefront and dashboard don't support expiration of token
+JWT_EXPIRE = get_bool_from_env("JWT_EXPIRE", False)
+JWT_TTL_ACCESS = timedelta(seconds=parse(os.environ.get("JWT_TTL_ACCESS", "5 minutes")))
+JWT_TTL_REFRESH = timedelta(seconds=parse(os.environ.get("JWT_TTL_REFRESH", "30 days")))
+
+
+JWT_TTL_REQUEST_EMAIL_CHANGE = timedelta(
+    seconds=parse(os.environ.get("JWT_TTL_REQUEST_EMAIL_CHANGE", "1 hour")),
+)

@@ -1,4 +1,5 @@
 import logging
+from dataclasses import asdict
 from decimal import Decimal
 from typing import TYPE_CHECKING, Any, Dict, Iterable, List, Union
 from urllib.parse import urljoin
@@ -40,6 +41,8 @@ logger = logging.getLogger(__name__)
 
 class AvataxPlugin(BasePlugin):
     PLUGIN_NAME = "Avalara"
+    PLUGIN_ID = "mirumee.taxes.avalara"
+
     DEFAULT_CONFIGURATION = [
         {"name": "Username or account", "value": None},
         {"name": "Password or license", "value": None},
@@ -112,6 +115,7 @@ class AvataxPlugin(BasePlugin):
     def calculate_checkout_total(
         self,
         checkout: "Checkout",
+        lines: Iterable["CheckoutLine"],
         discounts: Iterable[DiscountInfo],
         previous_value: TaxedMoney,
     ) -> TaxedMoney:
@@ -149,11 +153,13 @@ class AvataxPlugin(BasePlugin):
             sub_net += Decimal(line.get("lineAmount", 0.0))
         sub_total_gross = Money(sub_net + sub_tax, currency)
         sub_total_net = Money(sub_net, currency)
+
         return TaxedMoney(net=sub_total_net, gross=sub_total_gross)
 
     def calculate_checkout_subtotal(
         self,
         checkout: "Checkout",
+        lines: Iterable["CheckoutLine"],
         discounts: Iterable[DiscountInfo],
         previous_value: TaxedMoney,
     ) -> TaxedMoney:
@@ -163,7 +169,6 @@ class AvataxPlugin(BasePlugin):
         base_subtotal = previous_value
         if not _validate_checkout(checkout):
             return base_subtotal
-
         response = get_checkout_tax_data(checkout, discounts, self.config)
         if not response or "error" in response:
             return base_subtotal
@@ -184,11 +189,13 @@ class AvataxPlugin(BasePlugin):
 
         shipping_gross = Money(amount=shipping_net + shipping_tax, currency=currency)
         shipping_net = Money(amount=shipping_net, currency=currency)
+
         return TaxedMoney(net=shipping_net, gross=shipping_gross)
 
     def calculate_checkout_shipping(
         self,
         checkout: "Checkout",
+        lines: Iterable["CheckoutLine"],
         discounts: Iterable[DiscountInfo],
         previous_value: TaxedMoney,
     ) -> TaxedMoney:
@@ -254,7 +261,7 @@ class AvataxPlugin(BasePlugin):
         transaction_url = urljoin(
             get_api_url(self.config.use_sandbox), "transactions/createoradjust"
         )
-        api_post_request_task.delay(transaction_url, data, self.config)
+        api_post_request_task.delay(transaction_url, data, asdict(self.config))
         return previous_value
 
     def calculate_checkout_line_total(
@@ -366,6 +373,12 @@ class AvataxPlugin(BasePlugin):
         if not self.active:
             return previous_value
         return False
+
+    def fetch_taxes_data(self, previous_value):
+        if not self.active:
+            return previous_value
+        get_cached_tax_codes_or_fetch(self.config)
+        return True
 
     @classmethod
     def validate_plugin_configuration(cls, plugin_configuration: "PluginConfiguration"):

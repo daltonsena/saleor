@@ -1,5 +1,6 @@
 from decimal import Decimal
 from operator import attrgetter
+from re import match
 from typing import Optional
 from uuid import uuid4
 
@@ -243,6 +244,15 @@ class Order(ModelWithMetadata):
             .exists()
         )
 
+    def is_captured(self):
+        return (
+            self.payments.filter(
+                is_active=True, transactions__kind=TransactionKind.CAPTURE
+            )
+            .filter(transactions__is_success=True)
+            .exists()
+        )
+
     @property
     def quantity_fulfilled(self):
         return sum([line.quantity_fulfilled for line in self])
@@ -265,7 +275,9 @@ class Order(ModelWithMetadata):
         return self.status in statuses
 
     def can_cancel(self):
-        return self.status not in {OrderStatus.CANCELED, OrderStatus.DRAFT}
+        return (
+            not self.fulfillments.exclude(status=FulfillmentStatus.CANCELED).exists()
+        ) and self.status not in {OrderStatus.CANCELED, OrderStatus.DRAFT}
 
     def can_capture(self, payment=None):
         if not payment:
@@ -428,6 +440,9 @@ class Fulfillment(ModelWithMetadata):
     tracking_number = models.CharField(max_length=255, default="", blank=True)
     created = models.DateTimeField(auto_now_add=True)
 
+    class Meta:
+        ordering = ("pk",)
+
     def __str__(self):
         return f"Fulfillment #{self.composed_id}"
 
@@ -453,6 +468,10 @@ class Fulfillment(ModelWithMetadata):
     def get_total_quantity(self):
         return sum([line.quantity for line in self])
 
+    @property
+    def is_tracking_number_url(self):
+        return bool(match(r"^[-\w]+://", self.tracking_number))
+
 
 class FulfillmentLine(models.Model):
     order_line = models.ForeignKey(
@@ -462,6 +481,13 @@ class FulfillmentLine(models.Model):
         Fulfillment, related_name="lines", on_delete=models.CASCADE
     )
     quantity = models.PositiveIntegerField()
+    stock = models.ForeignKey(
+        "warehouse.Stock",
+        related_name="fulfillment_lines",
+        on_delete=models.SET_NULL,
+        blank=True,
+        null=True,
+    )
 
 
 class OrderEvent(models.Model):
@@ -495,10 +521,3 @@ class OrderEvent(models.Model):
 
     def __repr__(self):
         return f"{self.__class__.__name__}(type={self.type!r}, user={self.user!r})"
-
-
-class Invoice(models.Model):
-    order = models.ForeignKey(Order, null=True, on_delete=models.SET_NULL)
-    number = models.CharField(max_length=255)
-    created = models.DateTimeField(auto_now_add=True)
-    url = models.URLField(max_length=2048)

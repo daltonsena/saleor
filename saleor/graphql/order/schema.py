@@ -3,6 +3,7 @@ import graphene
 from ...core.permissions import OrderPermissions
 from ..core.enums import ReportingPeriod
 from ..core.fields import FilterInputConnectionField, PrefetchingConnectionField
+from ..core.scalars import UUID
 from ..core.types import FilterInputObjectType, TaxedMoney
 from ..decorators import permission_required
 from .bulk_mutations.draft_orders import DraftOrderBulkDelete, DraftOrderLinesBulkDelete
@@ -22,10 +23,10 @@ from .mutations.fulfillments import (
     FulfillmentCancel,
     FulfillmentClearMeta,
     FulfillmentClearPrivateMeta,
-    FulfillmentCreate,
     FulfillmentUpdateMeta,
     FulfillmentUpdatePrivateMeta,
     FulfillmentUpdateTracking,
+    OrderFulfill,
 )
 from .mutations.orders import (
     OrderAddNote,
@@ -117,9 +118,7 @@ class OrderQueries(graphene.ObjectType):
     order_by_token = graphene.Field(
         Order,
         description="Look up an order by token.",
-        token=graphene.Argument(
-            graphene.UUID, description="The order's token.", required=True
-        ),
+        token=graphene.Argument(UUID, description="The order's token.", required=True),
     )
 
     @permission_required(OrderPermissions.MANAGE_ORDERS)
@@ -131,16 +130,12 @@ class OrderQueries(graphene.ObjectType):
         return resolve_order(info, data.get("id"))
 
     @permission_required(OrderPermissions.MANAGE_ORDERS)
-    def resolve_orders(
-        self, info, created=None, status=None, query=None, sort_by=None, **_kwargs
-    ):
-        return resolve_orders(info, created, status, query, sort_by)
+    def resolve_orders(self, info, created=None, status=None, **_kwargs):
+        return resolve_orders(info, created, status)
 
     @permission_required(OrderPermissions.MANAGE_ORDERS)
-    def resolve_draft_orders(
-        self, info, created=None, query=None, sort_by=None, **_kwargs
-    ):
-        return resolve_draft_orders(info, created, query, sort_by)
+    def resolve_draft_orders(self, info, created=None, **_kwargs):
+        return resolve_draft_orders(info, created)
 
     @permission_required(OrderPermissions.MANAGE_ORDERS)
     def resolve_orders_total(self, info, period, **_kwargs):
@@ -176,8 +171,8 @@ class OrderMutations(graphene.ObjectType):
             "after 2020-07-31."
         )
     )
+    order_fulfill = OrderFulfill.Field()
     order_fulfillment_cancel = FulfillmentCancel.Field()
-    order_fulfillment_create = FulfillmentCreate.Field()
     order_fulfillment_update_tracking = FulfillmentUpdateTracking.Field()
     order_fulfillment_clear_meta = FulfillmentClearMeta.Field(
         deprecation_reason=(

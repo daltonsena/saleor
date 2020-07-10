@@ -5,18 +5,15 @@ from django.conf import settings
 from django.contrib.postgres.aggregates import StringAgg
 from django.contrib.postgres.fields import JSONField
 from django.db import models
-from django.db.models import Case, Count, F, FilteredRelation, Q, When
+from django.db.models import Case, Count, F, FilteredRelation, Q, Value, When
 from django.urls import reverse
 from django.utils.encoding import smart_text
-from django.utils.text import slugify
 from django_measurement.models import MeasurementField
 from django_prices.models import MoneyField
 from draftjs_sanitizer import clean_draft_js
 from measurement.measures import Weight
 from mptt.managers import TreeManager
 from mptt.models import MPTTModel
-from prices import MoneyRange
-from text_unidecode import unidecode
 from versatileimagefield.fields import PPOIField, VersatileImageField
 
 from ..core.db.fields import SanitizedJSONField
@@ -101,6 +98,7 @@ class ProductType(ModelWithMetadata):
     )
 
     class Meta:
+        ordering = ("slug",)
         app_label = "product"
 
     def __str__(self) -> str:
@@ -117,53 +115,41 @@ class ProductType(ModelWithMetadata):
 
 
 class ProductsQueryset(PublishedQuerySet):
-    MINIMAL_PRICE_FIELDS = {"minimal_variant_price_amount", "minimal_variant_price"}
-
-    def create(self, **kwargs):
-        """Create a product.
-
-        In the case of absent "minimal_variant_price" make it default to the "price"
-        """
-        if not kwargs.keys() & self.MINIMAL_PRICE_FIELDS:
-            minimal_amount = None
-            if "price" in kwargs:
-                minimal_amount = kwargs["price"].amount
-            elif "price_amount" in kwargs:
-                minimal_amount = kwargs["price_amount"]
-            kwargs["minimal_variant_price_amount"] = minimal_amount
-        return super().create(**kwargs)
-
-    def bulk_create(self, objs, batch_size=None, ignore_conflicts=False):
-        """Insert each of the product instances into the database.
-
-        Make sure every product has "minimal_variant_price" set. Otherwise
-        make it default to the "price".
-        """
-        for obj in objs:
-            if obj.minimal_variant_price_amount is None:
-                obj.minimal_variant_price_amount = obj.price.amount
-        return super().bulk_create(
-            objs, batch_size=batch_size, ignore_conflicts=ignore_conflicts
-        )
-
     def collection_sorted(self, user: "User"):
-        qs = self.visible_to_user(user).prefetch_related(
-            "collections__products__collectionproduct"
-        )
+        qs = self.visible_to_user(user)
         qs = qs.order_by(
             F("collectionproduct__sort_order").asc(nulls_last=True),
             F("collectionproduct__id"),
         )
         return qs
 
-    def sort_by_attribute(self, attribute_pk: Union[int, str], ascending: bool = True):
+    def published_with_variants(self):
+        published = self.published()
+        return published.filter(variants__isnull=False)
+
+    def visible_to_user(self, user):
+        if self.user_has_access_to_all(user):
+            return self.all()
+        return self.published_with_variants()
+
+    def sort_by_attribute(
+        self, attribute_pk: Union[int, str], descending: bool = False
+    ):
         """Sort a query set by the values of the given product attribute.
 
-        :param attribute_pk: The database ID (must be a number) of the attribute
+        :param attribute_pk: The database ID (must be a numeric) of the attribute
                              to sort by.
-        :param ascending: The sorting direction.
+        :param descending: The sorting direction.
         """
         qs: models.QuerySet = self
+        # If the passed attribute ID is valid, execute the sorting
+        if not (isinstance(attribute_pk, int) or attribute_pk.isnumeric()):
+            return qs.annotate(
+                concatenated_values_order=Value(
+                    None, output_field=models.IntegerField()
+                ),
+                concatenated_values=Value(None, output_field=models.CharField()),
+            )
 
         # Retrieve all the products' attribute data IDs (assignments) and
         # product types that have the given attribute associated to them
@@ -174,67 +160,71 @@ class ProductsQueryset(PublishedQuerySet):
         )
 
         if not associated_values:
-            if not ascending:
-                return qs.reverse()
-            return qs
-
-        attribute_associations, product_types_associated_to_attribute = zip(
-            *associated_values
-        )
-
-        qs = qs.annotate(
-            # Contains to retrieve the attribute data (singular) of each product
-            # Refer to `AttributeProduct`.
-            filtered_attribute=FilteredRelation(
-                relation_name="attributes",
-                condition=Q(attributes__assignment_id__in=attribute_associations),
-            ),
-            # Implicit `GROUP BY` required for the `StringAgg` aggregation
-            grouped_ids=Count("id"),
-            # String aggregation of the attribute's values to efficiently sort them
-            concatenated_values=Case(
-                # If the product has no association data but has the given attribute
-                # associated to its product type, then consider the concatenated values
-                # as empty (non-null).
-                When(
-                    Q(product_type_id__in=product_types_associated_to_attribute)
-                    & Q(filtered_attribute=None),
-                    then=models.Value(""),
+            qs = qs.annotate(
+                concatenated_values_order=Value(
+                    None, output_field=models.IntegerField()
                 ),
-                default=StringAgg(
-                    F("filtered_attribute__values__name"),
-                    delimiter=",",
-                    ordering=(
-                        [
-                            f"filtered_attribute__values__{field_name}"
-                            for field_name in AttributeValue._meta.ordering or []
-                        ]
+                concatenated_values=Value(None, output_field=models.CharField()),
+            )
+
+        else:
+            attribute_associations, product_types_associated_to_attribute = zip(
+                *associated_values
+            )
+
+            qs = qs.annotate(
+                # Contains to retrieve the attribute data (singular) of each product
+                # Refer to `AttributeProduct`.
+                filtered_attribute=FilteredRelation(
+                    relation_name="attributes",
+                    condition=Q(attributes__assignment_id__in=attribute_associations),
+                ),
+                # Implicit `GROUP BY` required for the `StringAgg` aggregation
+                grouped_ids=Count("id"),
+                # String aggregation of the attribute's values to efficiently sort them
+                concatenated_values=Case(
+                    # If the product has no association data but has
+                    # the given attribute associated to its product type,
+                    # then consider the concatenated values as empty (non-null).
+                    When(
+                        Q(product_type_id__in=product_types_associated_to_attribute)
+                        & Q(filtered_attribute=None),
+                        then=models.Value(""),
                     ),
+                    default=StringAgg(
+                        F("filtered_attribute__values__name"),
+                        delimiter=",",
+                        ordering=(
+                            [
+                                f"filtered_attribute__values__{field_name}"
+                                for field_name in AttributeValue._meta.ordering or []
+                            ]
+                        ),
+                    ),
+                    output_field=models.CharField(),
                 ),
-                output_field=models.CharField(),
-            ),
-            concatenated_values_order=Case(
-                # Make the products having no such attribute be last in the sorting
-                When(concatenated_values=None, then=2),
-                # Put the products having an empty attribute value at the bottom of
-                # the other products.
-                When(concatenated_values="", then=1),
-                # Put the products having an attribute value to be always at the top
-                default=0,
-                output_field=models.IntegerField(),
-            ),
-        )
+                concatenated_values_order=Case(
+                    # Make the products having no such attribute be last in the sorting
+                    When(concatenated_values=None, then=2),
+                    # Put the products having an empty attribute value at the bottom of
+                    # the other products.
+                    When(concatenated_values="", then=1),
+                    # Put the products having an attribute value to be always at the top
+                    default=0,
+                    output_field=models.IntegerField(),
+                ),
+            )
 
         # Sort by concatenated_values_order then
         # Sort each group of products (0, 1, 2, ...) per attribute values
         # Sort each group of products by name,
         # if they have the same values or not values
-        qs = qs.order_by("concatenated_values_order", "concatenated_values", "name")
-
-        # Descending sorting
-        if not ascending:
-            return qs.reverse()
-        return qs
+        ordering = "-" if descending else ""
+        return qs.order_by(
+            f"{ordering}concatenated_values_order",
+            f"{ordering}concatenated_values",
+            f"{ordering}name",
+        )
 
 
 class Product(SeoModel, ModelWithMetadata, PublishableModel):
@@ -260,15 +250,11 @@ class Product(SeoModel, ModelWithMetadata, PublishableModel):
         default=settings.DEFAULT_CURRENCY,
     )
 
-    price_amount = models.DecimalField(
-        max_digits=settings.DEFAULT_MAX_DIGITS,
-        decimal_places=settings.DEFAULT_DECIMAL_PLACES,
-    )
-    price = MoneyField(amount_field="price_amount", currency_field="currency")
-
     minimal_variant_price_amount = models.DecimalField(
         max_digits=settings.DEFAULT_MAX_DIGITS,
         decimal_places=settings.DEFAULT_DECIMAL_PLACES,
+        blank=True,
+        null=True,
     )
     minimal_variant_price = MoneyField(
         amount_field="minimal_variant_price_amount", currency_field="currency"
@@ -283,7 +269,7 @@ class Product(SeoModel, ModelWithMetadata, PublishableModel):
 
     class Meta:
         app_label = "product"
-        ordering = ("name",)
+        ordering = ("slug",)
         permissions = (
             (ProductPermissions.MANAGE_PRODUCTS.codename, "Manage products."),
         )
@@ -305,15 +291,6 @@ class Product(SeoModel, ModelWithMetadata, PublishableModel):
     def __str__(self) -> str:
         return self.name
 
-    def save(
-        self, force_insert=False, force_update=False, using=None, update_fields=None
-    ):
-        # Make sure the "minimal_variant_price_amount" is set
-        if self.minimal_variant_price_amount is None:
-            self.minimal_variant_price_amount = self.price_amount
-
-        return super().save(force_insert, force_update, using, update_fields)
-
     @property
     def plain_text_description(self) -> str:
         return json_content_to_raw_text(self.description_json)
@@ -322,14 +299,9 @@ class Product(SeoModel, ModelWithMetadata, PublishableModel):
         images = list(self.images.all())
         return images[0] if images else None
 
-    def get_price_range(
-        self, discounts: Optional[Iterable[DiscountInfo]] = None
-    ) -> MoneyRange:
-        if self.variants.all():
-            prices = [variant.get_price(discounts) for variant in self]
-            return MoneyRange(min(prices), max(prices))
-        price = calculate_discounted_price(self, self.price, discounts)
-        return MoneyRange(start=price, stop=price)
+    @staticmethod
+    def sort_by_attribute_fields() -> list:
+        return ["concatenated_values_order", "concatenated_values", "name"]
 
 
 class ProductTranslation(SeoModelTranslation):
@@ -337,7 +309,7 @@ class ProductTranslation(SeoModelTranslation):
     product = models.ForeignKey(
         Product, related_name="translations", on_delete=models.CASCADE
     )
-    name = models.CharField(max_length=128)
+    name = models.CharField(max_length=250)
     description = models.TextField(blank=True)
     description_json = SanitizedJSONField(
         blank=True, default=dict, sanitizer=clean_draft_js
@@ -402,15 +374,11 @@ class ProductVariant(ModelWithMetadata):
         blank=True,
         null=True,
     )
-    price_override_amount = models.DecimalField(
+    price_amount = models.DecimalField(
         max_digits=settings.DEFAULT_MAX_DIGITS,
         decimal_places=settings.DEFAULT_DECIMAL_PLACES,
-        blank=True,
-        null=True,
     )
-    price_override = MoneyField(
-        amount_field="price_override_amount", currency_field="currency"
-    )
+    price = MoneyField(amount_field="price_amount", currency_field="currency")
     product = models.ForeignKey(
         Product, related_name="variants", on_delete=models.CASCADE
     )
@@ -432,6 +400,7 @@ class ProductVariant(ModelWithMetadata):
     translated = TranslationProxy()
 
     class Meta:
+        ordering = ("sku",)
         app_label = "product"
 
     def __str__(self) -> str:
@@ -441,16 +410,13 @@ class ProductVariant(ModelWithMetadata):
     def is_visible(self) -> bool:
         return self.product.is_visible
 
-    @property
-    def base_price(self) -> "Money":
-        return (
-            self.price_override
-            if self.price_override is not None
-            else self.product.price
-        )
-
     def get_price(self, discounts: Optional[Iterable[DiscountInfo]] = None) -> "Money":
-        return calculate_discounted_price(self.product, self.base_price, discounts)
+        return calculate_discounted_price(
+            product=self.product,
+            price=self.price,
+            collections=self.product.collections.all(),
+            discounts=discounts,
+        )
 
     def get_weight(self):
         return self.weight or self.product.weight or self.product.product_type.weight
@@ -630,7 +596,7 @@ class AttributeProduct(SortableModel):
 
     class Meta:
         unique_together = (("attribute", "product_type"),)
-        ordering = ("sort_order",)
+        ordering = ("sort_order", "pk")
 
     def get_ordering_queryset(self):
         return self.product_type.attributeproduct.all()
@@ -655,7 +621,7 @@ class AttributeVariant(SortableModel):
 
     class Meta:
         unique_together = (("attribute", "product_type"),)
-        ordering = ("sort_order",)
+        ordering = ("sort_order", "pk")
 
     def get_ordering_queryset(self):
         return self.product_type.attributevariant.all()
@@ -778,7 +744,7 @@ class AttributeValue(SortableModel):
     translated = TranslationProxy()
 
     class Meta:
-        ordering = ("sort_order", "id")
+        ordering = ("sort_order", "pk")
         unique_together = ("slug", "attribute")
 
     def __str__(self) -> str:
@@ -824,7 +790,7 @@ class ProductImage(SortableModel):
     alt = models.CharField(max_length=128, blank=True)
 
     class Meta:
-        ordering = ("sort_order",)
+        ordering = ("sort_order", "pk")
         app_label = "product"
 
     def get_ordering_queryset(self):

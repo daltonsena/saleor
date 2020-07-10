@@ -1,10 +1,13 @@
 from enum import Enum
 
-from ....account.error_codes import AccountErrorCode
+from ....account.error_codes import AccountErrorCode, PermissionGroupErrorCode
+from ....app.error_codes import AppErrorCode
 from ....checkout.error_codes import CheckoutErrorCode
 from ....core.error_codes import ShopErrorCode
+from ....csv.error_codes import ExportErrorCode
 from ....discount.error_codes import DiscountErrorCode
 from ....giftcard.error_codes import GiftCardErrorCode
+from ....invoice.error_codes import InvoiceErrorCode
 from ....menu.error_codes import MenuErrorCode
 from ....order.error_codes import OrderErrorCode
 from ....payment.error_codes import PaymentErrorCode
@@ -42,13 +45,17 @@ DJANGO_FORM_FIELDS_ERROR_CODES = [
 
 SALEOR_ERROR_CODE_ENUMS = [
     AccountErrorCode,
+    AppErrorCode,
     CheckoutErrorCode,
+    ExportErrorCode,
     DiscountErrorCode,
     PluginErrorCode,
     GiftCardErrorCode,
+    InvoiceErrorCode,
     MenuErrorCode,
     OrderErrorCode,
     PaymentErrorCode,
+    PermissionGroupErrorCode,
     ProductErrorCode,
     ShippingErrorCode,
     ShopErrorCode,

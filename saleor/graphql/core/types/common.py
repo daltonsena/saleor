@@ -4,9 +4,12 @@ from ....product.templatetags.product_images import get_thumbnail
 from ...translations.enums import LanguageCodeEnum
 from ..enums import (
     AccountErrorCode,
+    AppErrorCode,
     CheckoutErrorCode,
     DiscountErrorCode,
+    ExportErrorCode,
     GiftCardErrorCode,
+    InvoiceErrorCode,
     JobStatusEnum,
     MenuErrorCode,
     MetadataErrorCode,
@@ -14,6 +17,7 @@ from ..enums import (
     PageErrorCode,
     PaymentErrorCode,
     PermissionEnum,
+    PermissionGroupErrorCode,
     PluginErrorCode,
     ProductErrorCode,
     ShippingErrorCode,
@@ -31,6 +35,23 @@ class CountryDisplay(graphene.ObjectType):
     code = graphene.String(description="Country code.", required=True)
     country = graphene.String(description="Country name.", required=True)
     vat = graphene.Field(VAT, description="Country tax.")
+
+
+class LanguageDisplay(graphene.ObjectType):
+    code = LanguageCodeEnum(
+        description="ISO 639 representation of the language name.", required=True
+    )
+    language = graphene.String(description="Full name of the language.", required=True)
+
+
+class Permission(graphene.ObjectType):
+    code = PermissionEnum(description="Internal code for permission.", required=True)
+    name = graphene.String(
+        description="Describe action(s) allowed to do by permission.", required=True
+    )
+
+    class Meta:
+        description = "Represents a permission object in a friendly form."
 
 
 class Error(graphene.ObjectType):
@@ -51,12 +72,43 @@ class AccountError(Error):
     code = AccountErrorCode(description="The error code.", required=True)
 
 
+class AppError(Error):
+    code = AppErrorCode(description="The error code.", required=True)
+    permissions = graphene.List(
+        graphene.NonNull(PermissionEnum),
+        description="List of permissions which causes the error.",
+        required=False,
+    )
+
+
+class StaffError(AccountError):
+    permissions = graphene.List(
+        graphene.NonNull(PermissionEnum),
+        description="List of permissions which causes the error.",
+        required=False,
+    )
+    groups = graphene.List(
+        graphene.NonNull(graphene.ID),
+        description="List of permission group IDs which cause the error.",
+        required=False,
+    )
+    users = graphene.List(
+        graphene.NonNull(graphene.ID),
+        description="List of user IDs which causes the error.",
+        required=False,
+    )
+
+
 class CheckoutError(Error):
     code = CheckoutErrorCode(description="The error code.", required=True)
 
 
 class DiscountError(Error):
     code = DiscountErrorCode(description="The error code.", required=True)
+
+
+class ExportError(Error):
+    code = ExportErrorCode(description="The error code.", required=True)
 
 
 class MenuError(Error):
@@ -69,6 +121,30 @@ class MetadataError(Error):
 
 class OrderError(Error):
     code = OrderErrorCode(description="The error code.", required=True)
+    warehouse = graphene.ID(
+        description="Warehouse ID which causes the error.", required=False,
+    )
+    order_line = graphene.ID(
+        description="Order line ID which causes the error.", required=False,
+    )
+
+
+class InvoiceError(Error):
+    code = InvoiceErrorCode(description="The error code.", required=True)
+
+
+class PermissionGroupError(Error):
+    code = PermissionGroupErrorCode(description="The error code.", required=True)
+    permissions = graphene.List(
+        graphene.NonNull(PermissionEnum),
+        description="List of permissions which causes the error.",
+        required=False,
+    )
+    users = graphene.List(
+        graphene.NonNull(graphene.ID),
+        description="List of user IDs which causes the error.",
+        required=False,
+    )
 
 
 class ProductError(Error):
@@ -86,6 +162,11 @@ class ProductAttributeError(ProductError):
 class BulkProductError(ProductError):
     index = graphene.Int(
         description="Index of an input list item that caused the error."
+    )
+    warehouses = graphene.List(
+        graphene.NonNull(graphene.ID),
+        description="List of warehouse IDs which causes the error.",
+        required=False,
     )
 
 
@@ -142,21 +223,6 @@ class WishlistError(Error):
 
 class TranslationError(Error):
     code = TranslationErrorCode(description="The error code.", required=True)
-
-
-class LanguageDisplay(graphene.ObjectType):
-    code = LanguageCodeEnum(description="Language code.", required=True)
-    language = graphene.String(description="Language.", required=True)
-
-
-class PermissionDisplay(graphene.ObjectType):
-    code = PermissionEnum(description="Internal code for permission.", required=True)
-    name = graphene.String(
-        description="Describe action(s) allowed to do by permission.", required=True
-    )
-
-    class Meta:
-        description = "Represents a permission object in a friendly form."
 
 
 class SeoInput(graphene.InputObjectType):
@@ -225,7 +291,6 @@ class TaxType(graphene.ObjectType):
 
 
 class Job(graphene.Interface):
-    id = graphene.ID(description="ID of job.", required=True)
     status = JobStatusEnum(description="Job status.", required=True)
     created_at = graphene.DateTime(
         description="Created date time of job in ISO 8601 format.", required=True
@@ -233,3 +298,11 @@ class Job(graphene.Interface):
     updated_at = graphene.DateTime(
         description="Date time of job last update in ISO 8601 format.", required=True
     )
+
+    @classmethod
+    def resolve_type(cls, instance, _info):
+        """Map a data object to a Graphene type."""
+        MODEL_TO_TYPE_MAP = {
+            # <DjangoModel>: <GrapheneType>
+        }
+        return MODEL_TO_TYPE_MAP.get(type(instance))

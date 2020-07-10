@@ -2,7 +2,6 @@ from itertools import chain
 from typing import Tuple, Union
 
 import graphene
-from django.contrib.auth import get_user_model
 from django.core.exceptions import (
     NON_FIELD_ERRORS,
     ImproperlyConfigured,
@@ -13,15 +12,11 @@ from graphene import ObjectType
 from graphene.types.mutation import MutationOptions
 from graphene_django.registry import get_global_registry
 from graphql.error import GraphQLError
-from graphql_jwt import ObtainJSONWebToken, Verify
-from graphql_jwt.exceptions import JSONWebTokenError, PermissionDenied
 
-from ...account import models
-from ...account.error_codes import AccountErrorCode
-from ..account.types import User
+from ...core.exceptions import PermissionDenied
+from ...core.permissions import AccountPermissions
 from ..utils import get_nodes
 from .types import Error, Upload
-from .types.common import AccountError
 from .utils import from_global_id_strict_type, snake_to_camel_case
 from .utils.error_codes import get_error_code_from_error
 
@@ -32,17 +27,6 @@ def get_model_name(model):
     """Return name of the model with first letter lowercase."""
     model_name = model.__name__
     return model_name[:1].lower() + model_name[1:]
-
-
-def get_output_fields(model, return_field_name):
-    """Return mutation output field for model instance."""
-    model_type = registry.get_type_for_model(model)
-    if not model_type:
-        raise ImproperlyConfigured(
-            "Unable to find type for model %s in graphene registry" % model.__name__
-        )
-    fields = {return_field_name: graphene.Field(model_type)}
-    return fields
 
 
 def get_error_fields(error_type_class, error_type_field):
@@ -261,7 +245,7 @@ class BaseMutation(graphene.Mutation):
 
     @classmethod
     def check_permissions(cls, context, permissions=None):
-        """Determine whether user or service account has rights to perform this mutation.
+        """Determine whether user or app has rights to perform this mutation.
 
         Default implementation assumes that account is allowed to perform any
         mutation. By overriding this method or defining required permissions
@@ -274,9 +258,12 @@ class BaseMutation(graphene.Mutation):
             return True
         if context.user.has_perms(permissions):
             return True
-        service_account = getattr(context, "service_account", None)
-        if service_account and service_account.has_perms(permissions):
-            return True
+        app = getattr(context, "app", None)
+        if app:
+            # for now MANAGE_STAFF permission for app is not supported
+            if AccountPermissions.MANAGE_STAFF in permissions:
+                return False
+            return app.has_perms(permissions)
         return False
 
     @classmethod
@@ -308,10 +295,20 @@ class BaseMutation(graphene.Mutation):
             cls._meta.error_type_class is not None
             and cls._meta.error_type_field is not None
         ):
-            typed_errors = [
-                cls._meta.error_type_class(field=e.field, message=e.message, code=code)
-                for e, code, _params in errors
-            ]
+            typed_errors = []
+            error_class_fields = set(cls._meta.error_type_class._meta.fields.keys())
+            for e, code, params in errors:
+                error_instance = cls._meta.error_type_class(
+                    field=e.field, message=e.message, code=code
+                )
+                if params:
+                    # If some of the params key overlap with error class fields
+                    # attach param value to the error
+                    error_fields_in_params = set(params.keys()) & error_class_fields
+                    for error_field in error_fields_in_params:
+                        setattr(error_instance, error_field, params[error_field])
+                typed_errors.append(error_instance)
+
             extra.update({cls._meta.error_type_field: typed_errors})
         return cls(errors=[e[0] for e in errors], **extra)
 
@@ -342,12 +339,19 @@ class ModelMutation(BaseMutation):
             return_field_name = get_model_name(model)
         if arguments is None:
             arguments = {}
-        fields = get_output_fields(model, return_field_name)
 
         _meta.model = model
         _meta.return_field_name = return_field_name
         _meta.exclude = exclude
         super().__init_subclass_with_meta__(_meta=_meta, **options)
+
+        model_type = cls.get_type_for_model()
+        if not model_type:
+            raise ImproperlyConfigured(
+                "Unable to find type for model %s in graphene registry" % model.__name__
+            )
+        fields = {return_field_name: graphene.Field(model_type)}
+
         cls._update_mutation_arguments_and_fields(arguments=arguments, fields=fields)
 
     @classmethod
@@ -364,10 +368,12 @@ class ModelMutation(BaseMutation):
         """
 
         def is_list_of_ids(field):
-            return (
-                isinstance(field.type, graphene.List)
-                and field.type.of_type == graphene.ID
-            )
+            if isinstance(field.type, graphene.List):
+                of_type = field.type.of_type
+                if isinstance(of_type, graphene.NonNull):
+                    of_type = of_type.of_type
+                return of_type == graphene.ID
+            return False
 
         def is_id_field(field):
             return (
@@ -430,6 +436,10 @@ class ModelMutation(BaseMutation):
         instance.save()
 
     @classmethod
+    def get_type_for_model(cls):
+        return registry.get_type_for_model(cls._meta.model)
+
+    @classmethod
     def get_instance(cls, info, **data):
         """Retrieve an instance from the supplied global id.
 
@@ -437,7 +447,7 @@ class ModelMutation(BaseMutation):
         """
         object_id = data.get("id")
         if object_id:
-            model_type = registry.get_type_for_model(cls._meta.model)
+            model_type = cls.get_type_for_model()
             instance = cls.get_node_or_error(info, object_id, only_type=model_type)
         else:
             instance = cls._meta.model()
@@ -481,7 +491,7 @@ class ModelDeleteMutation(ModelMutation):
             raise PermissionDenied()
 
         node_id = data.get("id")
-        model_type = registry.get_type_for_model(cls._meta.model)
+        model_type = cls.get_type_for_model()
         instance = cls.get_node_or_error(info, node_id, only_type=model_type)
 
         if instance:
@@ -583,77 +593,3 @@ class ModelBulkDeleteMutation(BaseBulkMutation):
     @classmethod
     def bulk_action(cls, queryset):
         queryset.delete()
-
-
-class CreateToken(ObtainJSONWebToken):
-    """Mutation that authenticates a user and returns token and user data.
-
-    It overrides the default graphql_jwt.ObtainJSONWebToken to wrap potential
-    authentication errors in our Error type, which is consistent to how the rest of
-    the mutation works.
-    """
-
-    errors = graphene.List(
-        graphene.NonNull(Error),
-        required=True,
-        deprecation_reason=(
-            "Use typed errors with error codes. This field will be removed after "
-            "2020-07-31."
-        ),
-    )
-    account_errors = graphene.List(
-        graphene.NonNull(AccountError),
-        description="List of errors that occurred executing the mutation.",
-        required=True,
-    )
-    user = graphene.Field(User, description="A user instance.")
-
-    @classmethod
-    def mutate(cls, root, info, **kwargs):
-        try:
-            result = super().mutate(root, info, **kwargs)
-        except JSONWebTokenError as e:
-            errors = [Error(message=str(e))]
-            account_errors = [
-                AccountError(
-                    field="email",
-                    message="Please, enter valid credentials",
-                    code=AccountErrorCode.INVALID_CREDENTIALS,
-                )
-            ]
-            return CreateToken(errors=errors, account_errors=account_errors)
-        except ValidationError as e:
-            errors = validation_error_to_error_type(e)
-            return cls.handle_typed_errors(errors)
-        else:
-            return result
-
-    @classmethod
-    def handle_typed_errors(cls, errors: list):
-        account_errors = [
-            AccountError(field=e.field, message=e.message, code=code)
-            for e, code, _params in errors
-        ]
-        return cls(errors=[e[0] for e in errors], account_errors=account_errors)
-
-    @classmethod
-    def resolve(cls, root, info, **kwargs):
-        return cls(user=info.context.user, errors=[], account_errors=[])
-
-
-class VerifyToken(Verify):
-    """Mutation that confirms if token is valid and also returns user data."""
-
-    user = graphene.Field(User)
-
-    def resolve_user(self, _info, **_kwargs):
-        username_field = get_user_model().USERNAME_FIELD
-        kwargs = {username_field: self.payload.get(username_field)}
-        return models.User.objects.get(**kwargs)
-
-    @classmethod
-    def mutate(cls, root, info, token, **kwargs):
-        try:
-            return super().mutate(root, info, token, **kwargs)
-        except JSONWebTokenError:
-            return None

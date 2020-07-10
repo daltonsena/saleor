@@ -15,6 +15,7 @@ if TYPE_CHECKING:
     from ..product.models import Product, ProductType
     from ..account.models import Address, User
     from ..order.models import Fulfillment, OrderLine, Order
+    from ..invoice.models import Invoice
     from ..payment.interface import GatewayResponse, PaymentData, CustomerSource
 
 
@@ -43,6 +44,7 @@ class BasePlugin:
     """
 
     PLUGIN_NAME = ""
+    PLUGIN_ID = ""
     PLUGIN_DESCRIPTION = ""
     CONFIG_STRUCTURE = None
     DEFAULT_CONFIGURATION = []
@@ -67,6 +69,7 @@ class BasePlugin:
     def calculate_checkout_total(
         self,
         checkout: "Checkout",
+        lines: List["CheckoutLine"],
         discounts: List["DiscountInfo"],
         previous_value: TaxedMoney,
     ) -> TaxedMoney:
@@ -80,6 +83,7 @@ class BasePlugin:
     def calculate_checkout_subtotal(
         self,
         checkout: "Checkout",
+        lines: List["CheckoutLine"],
         discounts: List["DiscountInfo"],
         previous_value: TaxedMoney,
     ) -> TaxedMoney:
@@ -93,6 +97,7 @@ class BasePlugin:
     def calculate_checkout_shipping(
         self,
         checkout: "Checkout",
+        lines: List["CheckoutLine"],
         discounts: List["DiscountInfo"],
         previous_value: TaxedMoney,
     ) -> TaxedMoney:
@@ -208,6 +213,31 @@ class BasePlugin:
         """
         return NotImplemented
 
+    def invoice_request(
+        self,
+        order: "Order",
+        invoice: "Invoice",
+        number: Optional[str],
+        previous_value: Any,
+    ) -> Any:
+        """Trigger when invoice creation starts.
+
+        Overwrite to create invoice with proper data, call invoice.update_invoice.
+        """
+        return NotImplemented
+
+    def invoice_delete(self, invoice: "Invoice", previous_value: Any):
+        """Trigger before invoice is deleted.
+
+        Perform any extra logic before the invoice gets deleted.
+        Note there is no need to run invoice.delete() as it will happen in mutation.
+        """
+        return NotImplemented
+
+    def invoice_sent(self, invoice: "Invoice", email: str, previous_value: Any):
+        """Trigger after invoice is sent."""
+        return NotImplemented
+
     def assign_tax_code_to_object_meta(
         self, obj: Union["Product", "ProductType"], tax_code: str, previous_value: Any
     ):
@@ -287,6 +317,32 @@ class BasePlugin:
         """
         return NotImplemented
 
+    # Deprecated. This method will be removed in Saleor 3.0
+    def checkout_quantity_changed(
+        self, checkout: "Checkout", previous_value: Any
+    ) -> Any:
+        return NotImplemented
+
+    def checkout_created(self, checkout: "Checkout", previous_value: Any) -> Any:
+        """Trigger when checkout is created.
+
+        Overwrite this method if you need to trigger specific logic when a checkout is
+        created.
+        """
+        return NotImplemented
+
+    def checkout_updated(self, checkout: "Checkout", previous_value: Any) -> Any:
+        """Trigger when checkout is updated.
+
+        Overwrite this method if you need to trigger specific logic when a checkout is
+        updated.
+        """
+        return NotImplemented
+
+    def fetch_taxes_data(self, previous_value: Any) -> Any:
+        """Triggered when ShopFetchTaxRates mutation is called."""
+        return NotImplemented
+
     def authorize_payment(
         self, payment_information: "PaymentData", previous_value
     ) -> "GatewayResponse":
@@ -323,6 +379,9 @@ class BasePlugin:
     def get_payment_config(self, previous_value):
         return NotImplemented
 
+    def get_supported_currencies(self, previous_value):
+        return NotImplemented
+
     @classmethod
     def _update_config_items(
         cls, configuration_to_update: List[dict], current_config: List[dict]
@@ -343,6 +402,22 @@ class BasePlugin:
                     ):
                         new_value = new_value.lower() == "true"
                     config_item.update([("value", new_value)])
+
+        # Get new keys that don't exist in current_config and extend it.
+        current_config_keys = set(c_field["name"] for c_field in current_config)
+        configuration_to_update_dict = {
+            c_field["name"]: c_field["value"] for c_field in configuration_to_update
+        }
+        missing_keys = set(configuration_to_update_dict.keys()) - current_config_keys
+        for missing_key in missing_keys:
+            if not config_structure.get(missing_key):
+                continue
+            current_config.append(
+                {
+                    "name": missing_key,
+                    "value": configuration_to_update_dict[missing_key],
+                }
+            )
 
     @classmethod
     def validate_plugin_configuration(cls, plugin_configuration: "PluginConfiguration"):
@@ -389,8 +464,7 @@ class BasePlugin:
         config_structure = getattr(cls, "CONFIG_STRUCTURE") or {}
         desired_config_keys = set(config_structure.keys())
 
-        config = configuration or []
-        configured_keys = set(d["name"] for d in config)
+        configured_keys = set(d["name"] for d in configuration)
         missing_keys = desired_config_keys - configured_keys
 
         if not missing_keys:
@@ -401,7 +475,7 @@ class BasePlugin:
             return
 
         update_values = [copy(k) for k in default_config if k["name"] in missing_keys]
-        config.extend(update_values)
+        configuration.extend(update_values)
 
     @classmethod
     def get_default_active(cls):
@@ -410,6 +484,8 @@ class BasePlugin:
     def get_plugin_configuration(
         self, configuration: PluginConfigurationType
     ) -> PluginConfigurationType:
+        if not configuration:
+            configuration = []
         self._update_configuration_structure(configuration)
         if configuration:
             # Let's add a translated descriptions and labels

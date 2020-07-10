@@ -1,10 +1,10 @@
 import graphene
-import graphene_django_optimizer as gql_optimizer
 from graphene import relay
 
 from ....core.permissions import ProductPermissions
 from ....product import models
 from ...core.connection import CountableDjangoObjectType
+from ...core.scalars import UUID
 from ...decorators import permission_required
 from ...meta.deprecated.resolvers import resolve_meta, resolve_private_meta
 from ...meta.types import ObjectWithMetadata
@@ -12,10 +12,13 @@ from ...meta.types import ObjectWithMetadata
 
 class DigitalContentUrl(CountableDjangoObjectType):
     url = graphene.String(description="URL for digital content.")
+    token = graphene.Field(
+        UUID, description=("UUID of digital content."), required=True
+    )
 
     class Meta:
         model = models.DigitalContentUrl
-        only_fields = ["content", "created", "download_num", "token", "url"]
+        only_fields = ["content", "created", "download_num"]
         interfaces = (relay.Node,)
 
     @staticmethod
@@ -24,12 +27,8 @@ class DigitalContentUrl(CountableDjangoObjectType):
 
 
 class DigitalContent(CountableDjangoObjectType):
-    urls = gql_optimizer.field(
-        graphene.List(
-            lambda: DigitalContentUrl,
-            description="List of URLs for the digital variant.",
-        ),
-        model_field="urls",
+    urls = graphene.List(
+        lambda: DigitalContentUrl, description="List of URLs for the digital variant.",
     )
 
     class Meta:
@@ -47,8 +46,7 @@ class DigitalContent(CountableDjangoObjectType):
 
     @staticmethod
     def resolve_urls(root: models.DigitalContent, info, **_kwargs):
-        qs = root.urls.all()
-        return gql_optimizer.query(qs, info)
+        return root.urls.all()
 
     @staticmethod
     @permission_required(ProductPermissions.MANAGE_PRODUCTS)

@@ -7,9 +7,9 @@ from django.db import transaction
 from django.db.models import Q, QuerySet
 from django.template.defaultfilters import slugify
 from graphene.types import InputObjectType
-from graphql_jwt.exceptions import PermissionDenied
 from graphql_relay import from_global_id
 
+from ....core.exceptions import PermissionDenied
 from ....core.permissions import ProductPermissions
 from ....product import models
 from ....product.error_codes import ProductErrorCode
@@ -28,7 +28,6 @@ from ....product.utils.attributes import (
     associate_attribute_values_to_instance,
     generate_name_for_variant,
 )
-from ....warehouse.management import set_stock_quantity
 from ...core.mutations import BaseMutation, ModelDeleteMutation, ModelMutation
 from ...core.scalars import Decimal, WeightScalar
 from ...core.types import SeoInput, Upload
@@ -36,6 +35,7 @@ from ...core.types.common import ProductError
 from ...core.utils import (
     clean_seo_fields,
     from_global_id_strict_type,
+    get_duplicated_values,
     validate_image_file,
     validate_slug_and_generate_if_needed,
 )
@@ -45,7 +45,7 @@ from ...warehouse.types import Warehouse
 from ..types import Category, Collection, Product, ProductImage, ProductVariant
 from ..utils import (
     create_stocks,
-    get_used_attibute_values_for_variant,
+    get_used_attribute_values_for_variant,
     get_used_variants_attribute_values,
     validate_attribute_input_for_product,
     validate_attribute_input_for_variant,
@@ -516,7 +516,6 @@ class ProductInput(graphene.InputObjectType):
     )
     name = graphene.String(description="Product name.")
     slug = graphene.String(description="Product slug.")
-    base_price = Decimal(description="Product price.")
     tax_code = graphene.String(description="Tax rate for enabled tax gateway.")
     seo = SeoInput(description="Search engine optimization fields.")
     weight = WeightScalar(description="Weight of the Product.", required=False)
@@ -526,18 +525,17 @@ class ProductInput(graphene.InputObjectType):
             "a product doesn't use variants."
         )
     )
-    quantity = graphene.Int(
-        description=(
-            "[Deprecated] Use stocks input field instead. This field will be removed "
-            "after 2020-07-31. The total quantity of a product available for sale. "
-            "Note: this field is only used if a product doesn't use variants."
-        ),
-    )
     track_inventory = graphene.Boolean(
         description=(
             "Determines if the inventory of this product should be tracked. If false, "
             "the quantity won't change when customers buy this item. Note: this field "
             "is only used if a product doesn't use variants."
+        )
+    )
+    base_price = Decimal(
+        description=(
+            "Default price for product variant. "
+            "Note: this field is only used if a product doesn't use variants."
         )
     )
 
@@ -809,6 +807,18 @@ class ProductCreate(ModelMutation):
     @classmethod
     def clean_input(cls, info, instance, data):
         cleaned_input = super().clean_input(info, instance, data)
+
+        weight = cleaned_input.get("weight")
+        if weight and weight.value < 0:
+            raise ValidationError(
+                {
+                    "weight": ValidationError(
+                        "Product can't have negative weight.",
+                        code=ProductErrorCode.INVALID,
+                    )
+                }
+            )
+
         # Attributes are provided as list of `AttributeValueInput` objects.
         # We need to transform them into the format they're stored in the
         # `Product` model, which is HStore field that maps attribute's PK to
@@ -826,23 +836,6 @@ class ProductCreate(ModelMutation):
         except ValidationError as error:
             error.code = ProductErrorCode.REQUIRED.value
             raise ValidationError({"slug": error})
-        # Try to get price from "basePrice" or "price" field. Once "price" is removed
-        # from the schema, only "basePrice" should be used here.
-        price = data.get("base_price", data.get("price"))
-        if price is not None:
-            if price < 0:
-                raise ValidationError(
-                    {
-                        "basePrice": ValidationError(
-                            "Product base price cannot be lower than 0.",
-                            code=ProductErrorCode.INVALID,
-                        )
-                    }
-                )
-            cleaned_input["price_amount"] = price
-            if instance.minimal_variant_price_amount is None:
-                # Set the default "minimal_variant_price" to the "price"
-                cleaned_input["minimal_variant_price_amount"] = price
 
         # FIXME  tax_rate logic should be dropped after we remove tax_rate from input
         tax_rate = cleaned_input.pop("tax_rate", "")
@@ -912,7 +905,7 @@ class ProductCreate(ModelMutation):
     @classmethod
     def check_for_duplicates_in_stocks(cls, stocks_data):
         warehouse_ids = [stock["warehouse"] for stock in stocks_data]
-        duplicates = {id for id in warehouse_ids if warehouse_ids.count(id) > 1}
+        duplicates = get_duplicated_values(warehouse_ids)
         if duplicates:
             error_msg = "Duplicated warehouse ID: {}".format(duplicates.join(", "))
             raise ValidationError(
@@ -947,15 +940,17 @@ class ProductCreate(ModelMutation):
                 "track_inventory", site_settings.track_inventory_by_default
             )
             sku = cleaned_input.get("sku")
+            variant_price = cleaned_input.get("base_price")
+
             variant = models.ProductVariant.objects.create(
-                product=instance, track_inventory=track_inventory, sku=sku
+                product=instance,
+                track_inventory=track_inventory,
+                sku=sku,
+                price_amount=variant_price,
             )
             stocks = cleaned_input.get("stocks")
-            quantity = cleaned_input.get("quantity")
             if stocks:
                 cls.create_variant_stocks(variant, stocks)
-            elif quantity:  # DEPRECATED: Will be removed in 2.11 (issue #5325)
-                set_stock_quantity(variant, info.context.country, quantity)
 
         attributes = cleaned_input.get("attributes")
         if attributes:
@@ -1023,14 +1018,12 @@ class ProductUpdate(ProductCreate):
             if "track_inventory" in cleaned_input:
                 variant.track_inventory = cleaned_input["track_inventory"]
                 update_fields.append("track_inventory")
-            # DEPRECATED: Wil be removed in 2.11 (issue #5325).
-            # Use ProductVariantStocksUpdate insted.
-            if "quantity" in cleaned_input:
-                quantity = cleaned_input.get("quantity")
-                set_stock_quantity(variant, info.context.country, quantity)
             if "sku" in cleaned_input:
                 variant.sku = cleaned_input["sku"]
                 update_fields.append("sku")
+            if "base_price" in cleaned_input:
+                variant.price_amount = cleaned_input["base_price"]
+                update_fields.append("price_amount")
             if update_fields:
                 variant.save(update_fields=update_fields)
         # Recalculate the "minimal variant price"
@@ -1100,14 +1093,8 @@ class ProductVariantInput(graphene.InputObjectType):
         description="List of attributes specific to this variant.",
     )
     cost_price = Decimal(description="Cost price of the variant.")
-    price_override = Decimal(description="Special price of the particular variant.")
+    price = Decimal(description="Price of the particular variant.")
     sku = graphene.String(description="Stock keeping unit.")
-    quantity = graphene.Int(
-        description=(
-            "[Deprecated] Use stocks input field instead. This field will be removed "
-            "after 2020-07-31. The total quantity of this variant available for sale."
-        ),
-    )
     track_inventory = graphene.Boolean(
         description=(
             "Determines if the inventory of this variant should be tracked. If false, "
@@ -1168,7 +1155,7 @@ class ProductVariantCreate(ModelMutation):
         if attribute_values in used_attribute_values:
             raise ValidationError(
                 "Duplicated attribute values for product variant.",
-                ProductErrorCode.UNIQUE,
+                ProductErrorCode.DUPLICATED_INPUT_ITEM,
             )
         else:
             used_attribute_values.append(attribute_values)
@@ -1178,6 +1165,17 @@ class ProductVariantCreate(ModelMutation):
         cls, info, instance: models.ProductVariant, data: dict, input_cls=None
     ):
         cleaned_input = super().clean_input(info, instance, data)
+
+        weight = cleaned_input.get("weight")
+        if weight and weight.value < 0:
+            raise ValidationError(
+                {
+                    "weight": ValidationError(
+                        "Product variant can't have negative weight.",
+                        code=ProductErrorCode.INVALID.value,
+                    )
+                }
+            )
 
         if "cost_price" in cleaned_input:
             cost_price = cleaned_input.pop("cost_price")
@@ -1191,19 +1189,18 @@ class ProductVariantCreate(ModelMutation):
                     }
                 )
             cleaned_input["cost_price_amount"] = cost_price
-
-        if "price_override" in cleaned_input:
-            price_override = cleaned_input.pop("price_override")
-            if price_override and price_override < 0:
+        if "price" in cleaned_input:
+            price = cleaned_input.pop("price")
+            if price is not None and price < 0:
                 raise ValidationError(
                     {
-                        "priceOverride": ValidationError(
+                        "price": ValidationError(
                             "Product price cannot be lower than 0.",
                             code=ProductErrorCode.INVALID.value,
                         )
                     }
                 )
-            cleaned_input["price_override_amount"] = price_override
+            cleaned_input["price_amount"] = price
 
         stocks = cleaned_input.get("stocks")
         if stocks:
@@ -1244,7 +1241,7 @@ class ProductVariantCreate(ModelMutation):
     @classmethod
     def check_for_duplicates_in_stocks(cls, stocks_data):
         warehouse_ids = [stock["warehouse"] for stock in stocks_data]
-        duplicates = {id for id in warehouse_ids if warehouse_ids.count(id) > 1}
+        duplicates = get_duplicated_values(warehouse_ids)
         if duplicates:
             error_msg = "Duplicated warehouse ID: {}".format(", ".join(duplicates))
             raise ValidationError(
@@ -1280,11 +1277,8 @@ class ProductVariantCreate(ModelMutation):
         # Recalculate the "minimal variant price" for the parent product
         update_product_minimal_variant_price_task.delay(instance.product_id)
         stocks = cleaned_input.get("stocks")
-        quantity = cleaned_input.get("quantity")
         if stocks:
             cls.create_variant_stocks(instance, stocks)
-        elif quantity:  # DEPRECATED: Will be removed in 2.11 (issue #5325)
-            set_stock_quantity(instance, info.context.country, quantity)
 
         attributes = cleaned_input.get("attributes")
         if attributes:
@@ -1324,7 +1318,7 @@ class ProductVariantUpdate(ProductVariantCreate):
         # Check if the variant is getting updated,
         # and the assigned attributes do not change
         if instance.product_id is not None:
-            assigned_attributes = get_used_attibute_values_for_variant(instance)
+            assigned_attributes = get_used_attribute_values_for_variant(instance)
             input_attribute_values = defaultdict(list)
             for attribute in attributes:
                 input_attribute_values[attribute.id].extend(attribute.values)
@@ -1443,6 +1437,18 @@ class ProductTypeCreate(ModelMutation):
     @classmethod
     def clean_input(cls, info, instance, data):
         cleaned_input = super().clean_input(info, instance, data)
+
+        weight = cleaned_input.get("weight")
+        if weight and weight.value < 0:
+            raise ValidationError(
+                {
+                    "weight": ValidationError(
+                        "Product type can't have negative weight.",
+                        code=ProductErrorCode.INVALID,
+                    )
+                }
+            )
+
         try:
             cleaned_input = validate_slug_and_generate_if_needed(
                 instance, "name", cleaned_input
