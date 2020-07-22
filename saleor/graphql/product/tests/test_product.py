@@ -9,9 +9,11 @@ from django.core.exceptions import ValidationError
 from django.utils.dateparse import parse_datetime
 from django.utils.text import slugify
 from graphql_relay import to_global_id
+from measurement.measures import Weight
 from prices import Money
 
 from ....core.taxes import TaxType
+from ....core.weight import WeightUnits
 from ....plugins.manager import PluginsManager
 from ....product import AttributeInputType
 from ....product.error_codes import ProductErrorCode
@@ -114,6 +116,10 @@ QUERY_PRODUCT = """
         ) {
             id
             name
+            weight {
+                unit
+                value
+            }
         }
     }
     """
@@ -129,6 +135,52 @@ def test_product_query_by_id(
     product_data = content["data"]["product"]
     assert product_data is not None
     assert product_data["name"] == product.name
+
+
+def test_product_query_by_id_weight_returned_in_default_unit(
+    user_api_client, product, site_settings
+):
+    # given
+    product.weight = Weight(kg=10)
+    product.save(update_fields=["weight"])
+
+    site_settings.default_weight_unit = WeightUnits.POUND
+    site_settings.save(update_fields=["default_weight_unit"])
+
+    variables = {"id": graphene.Node.to_global_id("Product", product.pk)}
+
+    # when
+    response = user_api_client.post_graphql(QUERY_PRODUCT, variables=variables)
+
+    # then
+    content = get_graphql_content(response)
+    product_data = content["data"]["product"]
+    assert product_data is not None
+    assert product_data["name"] == product.name
+    assert product_data["weight"]["value"] == 22.046
+    assert product_data["weight"]["unit"] == WeightUnits.POUND.upper()
+
+
+def test_product_query_by_id_weight_is_rounded(user_api_client, product, site_settings):
+    # given
+    product.weight = Weight(kg=1.83456)
+    product.save(update_fields=["weight"])
+
+    site_settings.default_weight_unit = WeightUnits.KILOGRAM
+    site_settings.save(update_fields=["default_weight_unit"])
+
+    variables = {"id": graphene.Node.to_global_id("Product", product.pk)}
+
+    # when
+    response = user_api_client.post_graphql(QUERY_PRODUCT, variables=variables)
+
+    # then
+    content = get_graphql_content(response)
+    product_data = content["data"]["product"]
+    assert product_data is not None
+    assert product_data["name"] == product.name
+    assert product_data["weight"]["value"] == 1.835
+    assert product_data["weight"]["unit"] == WeightUnits.KILOGRAM.upper()
 
 
 def test_product_query_by_slug(
@@ -998,6 +1050,46 @@ def test_sort_products_product_type_name(
     assert product_type_name_0 < product_type_name_1
 
 
+QUERY_PRODUCT_TYPE = """
+    query ($id: ID!){
+        productType(
+            id: $id,
+        ) {
+            id
+            name
+            weight {
+                unit
+                value
+            }
+        }
+    }
+    """
+
+
+def test_product_type_query_by_id_weight_returned_in_default_unit(
+    user_api_client, product_type, site_settings
+):
+    # given
+    product_type.weight = Weight(kg=10)
+    product_type.save(update_fields=["weight"])
+
+    site_settings.default_weight_unit = WeightUnits.OUNCE
+    site_settings.save(update_fields=["default_weight_unit"])
+
+    variables = {"id": graphene.Node.to_global_id("ProductType", product_type.pk)}
+
+    # when
+    response = user_api_client.post_graphql(QUERY_PRODUCT_TYPE, variables=variables)
+
+    # then
+    content = get_graphql_content(response)
+    product_data = content["data"]["productType"]
+    assert product_data is not None
+    assert product_data["name"] == product_type.name
+    assert product_data["weight"]["value"] == 352.73999999999995
+    assert product_data["weight"]["unit"] == WeightUnits.OUNCE.upper()
+
+
 CREATE_PRODUCT_MUTATION = """
        mutation createProduct(
            $input: ProductCreateInput!
@@ -1262,6 +1354,42 @@ def test_create_product_with_negative_weight(
     error = data["productErrors"][0]
     assert error["field"] == "weight"
     assert error["code"] == ProductErrorCode.INVALID.name
+
+
+def test_create_product_with_unicode_in_slug_and_name(
+    staff_api_client,
+    product_type,
+    category,
+    description_json,
+    permission_manage_products,
+):
+    query = CREATE_PRODUCT_MUTATION
+
+    description_json = json.dumps(description_json)
+
+    product_type_id = graphene.Node.to_global_id("ProductType", product_type.pk)
+    category_id = graphene.Node.to_global_id("Category", category.pk)
+    product_name = "わたし-わ にっぽん です"
+    slug = "わたし-わ-にっぽん-です-2"
+
+    variables = {
+        "input": {
+            "productType": product_type_id,
+            "category": category_id,
+            "name": product_name,
+            "slug": slug,
+        }
+    }
+
+    response = staff_api_client.post_graphql(
+        query, variables, permissions=[permission_manage_products]
+    )
+    content = get_graphql_content(response)
+    data = content["data"]["productCreate"]
+    error = data["productErrors"]
+    assert not error
+    assert data["product"]["name"] == product_name
+    assert data["product"]["slug"] == slug
 
 
 QUERY_CREATE_PRODUCT_WITHOUT_VARIANTS = """
@@ -2337,6 +2465,56 @@ def test_product_type_query(
     assert data["productType"]["taxType"]["description"] == "Standard Taxes"
 
 
+PRODUCT_TYPE_CREATE_MUTATION = """
+    mutation createProductType(
+        $name: String,
+        $slug: String,
+        $taxCode: String,
+        $hasVariants: Boolean,
+        $isShippingRequired: Boolean,
+        $productAttributes: [ID],
+        $variantAttributes: [ID],
+        $weight: WeightScalar) {
+        productTypeCreate(
+            input: {
+                name: $name,
+                slug: $slug,
+                taxCode: $taxCode,
+                hasVariants: $hasVariants,
+                isShippingRequired: $isShippingRequired,
+                productAttributes: $productAttributes,
+                variantAttributes: $variantAttributes,
+                weight: $weight}) {
+            productType {
+                name
+                slug
+                taxRate
+                isShippingRequired
+                hasVariants
+                variantAttributes {
+                    name
+                    values {
+                        name
+                    }
+                }
+                productAttributes {
+                    name
+                    values {
+                        name
+                    }
+                }
+            }
+            productErrors {
+                field
+                message
+                code
+            }
+        }
+
+    }
+"""
+
+
 def test_product_type_create_mutation(
     staff_api_client,
     product_type,
@@ -2346,46 +2524,7 @@ def test_product_type_create_mutation(
 ):
     manager = PluginsManager(plugins=setup_vatlayer.PLUGINS)
 
-    query = """
-    mutation createProductType(
-        $name: String!,
-        $slug: String!,
-        $taxCode: String!,
-        $hasVariants: Boolean!,
-        $isShippingRequired: Boolean!,
-        $productAttributes: [ID],
-        $variantAttributes: [ID]) {
-        productTypeCreate(
-            input: {
-                name: $name,
-                slug: $slug,
-                taxCode: $taxCode,
-                hasVariants: $hasVariants,
-                isShippingRequired: $isShippingRequired,
-                productAttributes: $productAttributes,
-                variantAttributes: $variantAttributes}) {
-            productType {
-            name
-            slug
-            taxRate
-            isShippingRequired
-            hasVariants
-            variantAttributes {
-                name
-                values {
-                    name
-                }
-            }
-            productAttributes {
-                name
-                values {
-                    name
-                }
-            }
-            }
-        }
-    }
-    """
+    query = PRODUCT_TYPE_CREATE_MUTATION
     product_type_name = "test type"
     slug = "test-type"
     has_variants = True
@@ -2445,33 +2584,13 @@ def test_product_type_create_mutation(
         ("test-slug", "test-slug"),
         (None, "test-product-type"),
         ("", "test-product-type"),
+        ("わたし-わ-にっぽん-です", "わたし-わ-にっぽん-です"),
     ),
 )
 def test_create_product_type_with_given_slug(
     staff_api_client, permission_manage_products, input_slug, expected_slug
 ):
-    query = """
-        mutation(
-                $name: String, $slug: String) {
-            productTypeCreate(
-                input: {
-                    name: $name
-                    slug: $slug
-                }
-            ) {
-                productType {
-                    id
-                    name
-                    slug
-                }
-                productErrors {
-                    field
-                    message
-                    code
-                }
-            }
-        }
-    """
+    query = PRODUCT_TYPE_CREATE_MUTATION
     name = "Test product type"
     variables = {"name": name, "slug": input_slug}
     response = staff_api_client.post_graphql(
@@ -2483,30 +2602,26 @@ def test_create_product_type_with_given_slug(
     assert data["productType"]["slug"] == expected_slug
 
 
+def test_create_product_type_with_unicode_in_name(
+    staff_api_client, permission_manage_products
+):
+    query = PRODUCT_TYPE_CREATE_MUTATION
+    name = "わたし わ にっぽん です"
+    variables = {"name": name}
+    response = staff_api_client.post_graphql(
+        query, variables, permissions=[permission_manage_products]
+    )
+    content = get_graphql_content(response)
+    data = content["data"]["productTypeCreate"]
+    assert not data["productErrors"]
+    assert data["productType"]["name"] == name
+    assert data["productType"]["slug"] == "わたし-わ-にっぽん-です"
+
+
 def test_create_product_type_create_with_negative_weight(
     staff_api_client, permission_manage_products
 ):
-    query = """
-        mutation(
-                $name: String, $weight: WeightScalar) {
-            productTypeCreate(
-                input: {
-                    name: $name
-                    weight: $weight
-                }
-            ) {
-                productType {
-                    id
-                    name
-                }
-                productErrors {
-                    field
-                    message
-                    code
-                }
-            }
-        }
-    """
+    query = PRODUCT_TYPE_CREATE_MUTATION
     name = "Test product type"
     variables = {"name": name, "weight": -1.1}
     response = staff_api_client.post_graphql(
@@ -4256,26 +4371,26 @@ mutation createProduct(
 
 
 @pytest.mark.parametrize(
-    "weight, expected_weight_value, expected_weight_unit",
+    "weight, expected_weight_value",
     (
-        ("0", 0, "kg"),
-        (0, 0, "kg"),
-        (11.11, 11.11, "kg"),
-        (11, 11.0, "kg"),
-        ("11.11", 11.11, "kg"),
-        ({"value": 11.11, "unit": "kg"}, 11.11, "kg",),
-        ({"value": 11, "unit": "g"}, 11.0, "g",),
-        ({"value": "11.11", "unit": "ounce"}, 11.11, "oz",),
+        ("0", 0),
+        (0, 0),
+        (11.11, 11.11),
+        (11, 11.0),
+        ("11.11", 11.11),
+        ({"value": 11.11, "unit": "kg"}, 11.11),
+        ({"value": 11, "unit": "g"}, 0.011),
+        ({"value": "1", "unit": "ounce"}, 0.028),
     ),
 )
 def test_create_product_with_weight_variable(
     weight,
     expected_weight_value,
-    expected_weight_unit,
     staff_api_client,
     category,
     permission_manage_products,
     product_type_without_variant,
+    site_settings,
 ):
     category_id = graphene.Node.to_global_id("Category", category.pk)
     product_type_id = graphene.Node.to_global_id(
@@ -4297,30 +4412,30 @@ def test_create_product_with_weight_variable(
     content = get_graphql_content(response)
     result_weight = content["data"]["productCreate"]["product"]["weight"]
     assert result_weight["value"] == expected_weight_value
-    assert result_weight["unit"] == expected_weight_unit
+    assert result_weight["unit"] == site_settings.default_weight_unit.upper()
 
 
 @pytest.mark.parametrize(
-    "weight, expected_weight_value, expected_weight_unit",
+    "weight, expected_weight_value",
     (
-        ("0", 0, "kg"),
-        (0, 0, "kg"),
-        ("11.11", 11.11, "kg"),
-        ("11", 11.0, "kg"),
-        ('"11.11"', 11.11, "kg"),
-        ('{value: 11.11, unit: "kg"}', 11.11, "kg",),
-        ('{value: 11, unit: "g"}', 11.0, "g",),
-        ('{value: "11.11", unit: "ounce"}', 11.11, "oz",),
+        ("0", 0),
+        (0, 0),
+        ("11.11", 11.11),
+        ("11", 11.0),
+        ('"11.11"', 11.11),
+        ('{value: 11.11, unit: "kg"}', 11.11),
+        ('{value: 11, unit: "g"}', 0.011),
+        ('{value: "1", unit: "ounce"}', 0.028),
     ),
 )
 def test_create_product_with_weight_input(
     weight,
     expected_weight_value,
-    expected_weight_unit,
     staff_api_client,
     category,
     permission_manage_products,
     product_type_without_variant,
+    site_settings,
 ):
     # Because we use Scalars for Weight this test query tests only a scenario when
     # weight value is passed by directly in input
@@ -4374,4 +4489,4 @@ def test_create_product_with_weight_input(
     content = get_graphql_content(response)
     result_weight = content["data"]["productCreate"]["product"]["weight"]
     assert result_weight["value"] == expected_weight_value
-    assert result_weight["unit"] == expected_weight_unit
+    assert result_weight["unit"] == site_settings.default_weight_unit.upper()
