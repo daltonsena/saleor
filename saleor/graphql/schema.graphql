@@ -1533,10 +1533,10 @@ type CreateToken {
 
 type CreditCard {
   brand: String!
-  firstDigits: String!
+  firstDigits: String
   lastDigits: String!
-  expMonth: Int!
-  expYear: Int!
+  expMonth: Int
+  expYear: Int
 }
 
 type CustomerBulkDelete {
@@ -2671,7 +2671,6 @@ type Mutation {
   paymentCapture(amount: Decimal, paymentId: ID!): PaymentCapture
   paymentRefund(amount: Decimal, paymentId: ID!): PaymentRefund
   paymentVoid(paymentId: ID!): PaymentVoid
-  paymentSecureConfirm(paymentId: ID!): PaymentSecureConfirm
   pageCreate(input: PageInput!): PageCreate
   pageDelete(id: ID!): PageDelete
   pageBulkDelete(ids: [ID]!): PageBulkDelete
@@ -3368,14 +3367,11 @@ type Payment implements Node {
   token: String!
   checkout: Checkout
   order: Order
-  billingEmail: String!
   customerIpAddress: String
-  extraData: String!
   chargeStatus: PaymentChargeStatusEnum!
   actions: [OrderAction]!
   total: Money
   capturedAmount: Money
-  billingAddress: Address
   transactions: [Transaction]
   availableCaptureAmount: Money
   availableRefundAmount: Money
@@ -3443,12 +3439,6 @@ input PaymentInput {
 }
 
 type PaymentRefund {
-  errors: [Error!]! @deprecated(reason: "Use typed errors with error codes. This field will be removed after 2020-07-31.")
-  payment: Payment
-  paymentErrors: [PaymentError!]!
-}
-
-type PaymentSecureConfirm {
   errors: [Error!]! @deprecated(reason: "Use typed errors with error codes. This field will be removed after 2020-07-31.")
   payment: Payment
   paymentErrors: [PaymentError!]!
@@ -5013,7 +5003,6 @@ type Transaction implements Node {
   kind: TransactionKind!
   isSuccess: Boolean!
   error: TransactionError
-  gatewayResponse: JSONString!
   amount: Money
 }
 

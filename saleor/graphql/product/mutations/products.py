@@ -861,8 +861,9 @@ class ProductCreate(ModelMutation):
         if not category and is_published:
             raise ValidationError(
                 {
-                    "isPublished": ValidationError(
-                        "You must select a category to be able to publish"
+                    "category": ValidationError(
+                        "You must select a category to be able to publish",
+                        code=ProductErrorCode.REQUIRED,
                     )
                 }
             )
@@ -1191,6 +1192,18 @@ class ProductVariantCreate(ModelMutation):
                     }
                 )
             cleaned_input["cost_price_amount"] = cost_price
+
+        price = cleaned_input.get("price")
+        if price is None:
+            raise ValidationError(
+                {
+                    "price": ValidationError(
+                        "Variant price is required.",
+                        code=ProductErrorCode.REQUIRED.value,
+                    )
+                }
+            )
+
         if "price" in cleaned_input:
             price = cleaned_input.pop("price")
             if price is not None and price < 0:
